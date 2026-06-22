@@ -210,7 +210,42 @@ cd "openvpn-${OVPN_VERSION}"
 
 echo -e "  ${GREEN}✓ Source ready${NC}"
 
-echo -e "${CYAN}[Step 5/10]${NC} Configuring OpenVPN..."
+echo -e "${CYAN}[Step 5.5/10]${NC} Applying XOR patch..."
+
+# Download and apply Tunnelblick XOR patches
+PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-2.5.9/patches"
+PATCHES=(
+    "02-tunnelblick-openvpn_xorpatch-a.diff"
+    "03-tunnelblick-openvpn_xorpatch-b.diff"
+    "04-tunnelblick-openvpn_xorpatch-c.diff"
+    "05-tunnelblick-openvpn_xorpatch-d.diff"
+    "06-tunnelblick-openvpn_xorpatch-e.diff"
+)
+
+PATCH Applied=0
+for patch in "${PATCHES[@]}"; do
+    echo "  Downloading $patch..."
+    if wget -q "$PATCH_BASE/$patch" -O "/tmp/$patch"; then
+        if patch -p1 --dry-run < "/tmp/$patch" > /dev/null 2>&1; then
+            patch -p1 < "/tmp/$patch" && PATCH Applied=1 && echo "  ✓ Applied $patch"
+        else
+            echo "  ⚠ Patch $patch not compatible, skipping"
+        fi
+        rm -f "/tmp/$patch"
+    else
+        echo "  ⚠ Failed to download $patch"
+    fi
+done
+
+if [ "$PATCH Applied" -eq 0 ]; then
+    echo -e "  ${YELLOW}⚠ No XOR patches applied - using standard OpenVPN${NC}"
+    XOR_SUPPORT=0
+else
+    echo -e "  ${GREEN}✓ XOR patches applied${NC}"
+    XOR_SUPPORT=1
+fi
+
+echo -e "${CYAN}[Step 6/10]${NC} Configuring OpenVPN..."
 
 ./configure \
     --with-crypto-library=openssl \
@@ -281,8 +316,14 @@ wait
 
 /usr/local/sbin/openvpn --genkey secret "$OVPN_DIR/ta.key" 2>/dev/null
 
-# Generate XOR mask
-XOR_MASK=$(openssl rand -hex 8)
+# Generate XOR mask (only if XOR support is enabled)
+if [ "$XOR_SUPPORT" -eq 1 ]; then
+    XOR_MASK=$(openssl rand -hex 8)
+    echo "$XOR_MASK" > "$OVPN_DIR/xormask.txt"
+else
+    XOR_MASK=""
+    echo "disabled" > "$OVPN_DIR/xormask.txt"
+fi
 
 # Create server config
 cat > "$OVPN_DIR/server.conf" << EOF
@@ -306,8 +347,6 @@ cipher AES-256-GCM
 auth SHA256
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 
-scramble xormask ${XOR_MASK}
-
 persist-key
 persist-tun
 
@@ -318,8 +357,15 @@ user nobody
 group nogroup
 EOF
 
-echo -e "  ${GREEN}✓ PKI initialized${NC}"
-echo -e "  ${GREEN}✓ Config created with XOR mask: ${XOR_MASK}${NC}"
+# Add scramble line if XOR support is enabled
+if [ "$XOR_SUPPORT" -eq 1 ] && [ -n "$XOR_MASK" ]; then
+    sed -i "/^data-ciphers/a\\scramble xormask $XOR_MASK" "$OVPN_DIR/server.conf"
+    echo -e "  ${GREEN}✓ PKI initialized${NC}"
+    echo -e "  ${GREEN}✓ Config created with XOR mask: ${XOR_MASK}${NC}"
+else
+    echo -e "  ${GREEN}✓ PKI initialized${NC}"
+    echo -e "  ${YELLOW}⚠ Config created without XOR (patch not applied)${NC}"
+fi
 
 # Create systemd service
 cat > /etc/systemd/system/openvpn-xor.service << EOFSVC
@@ -411,7 +457,15 @@ ADMIN_DIR="/root/ovpn-xor-admin"
 cd "\$OVPN_DIR/easy-rsa"
 yes yes | ./easyrsa build-client-full "\$USER" nopass > /dev/null 2>&1
 SERVER_IP="\$(curl -s -4 ifconfig.me || echo 'SERVER_IP')"
-XOR_MASK="\$(cat \$OVPN_DIR/xormask.txt 2>/dev/null || echo 'default')"
+XOR_MASK="\$(cat \$OVPN_DIR/xormask.txt 2>/dev/null || echo '')"
+
+# Check if XOR is supported
+if [ -n "\$XOR_MASK" ] && [ "\$XOR_MASK" != "disabled" ] && [ "\$XOR_MASK" != "default" ]; then
+    XOR_LINE="scramble xormask \${XOR_MASK}"
+else
+    XOR_LINE=""
+fi
+
 cat > "\$ADMIN_DIR/clients/\$USER.ovpn" << EOF
 client
 dev tun
@@ -424,7 +478,7 @@ persist-tun
 remote-cert-tls server
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 auth SHA256
-scramble xormask \${XOR_MASK}
+\${XOR_LINE}
 verb 3
 <ca>
 \$(cat \$OVPN_DIR/ca.crt)
