@@ -302,4 +302,76 @@ export class OpenVpnOps {
       return 0;
     }
   }
+
+  /**
+   * Check if OpenVPN is already installed and return installation info
+   */
+  async checkInstallation(): Promise<{
+    installed: boolean;
+    version?: string;
+    xorMask?: string;
+    binaryExists: boolean;
+    configExists: boolean;
+    pkiExists: boolean;
+  }> {
+    const result: {
+      installed: boolean;
+      binaryExists: boolean;
+      configExists: boolean;
+      pkiExists: boolean;
+      version?: string;
+      xorMask?: string;
+    } = {
+      installed: false,
+      binaryExists: false,
+      configExists: false,
+      pkiExists: false,
+    };
+
+    try {
+      // Check if binary exists
+      await exec('test', ['-f', OVPN_BIN]);
+      result.binaryExists = true;
+
+      // Get version
+      try {
+        const { stdout: versionOutput } = await exec(OVPN_BIN, ['--version']);
+        const versionMatch = versionOutput.match(/OpenVPN (\d+\.\d+\.\d+)/);
+        if (versionMatch?.[1]) {
+          result.version = versionMatch[1];
+        }
+      } catch {
+        // Version check failed
+      }
+
+      // Check if config exists
+      try {
+        await exec('test', ['-f', `${OVPN_DIR}/server.conf`]);
+        result.configExists = true;
+
+        // Get XOR mask from config
+        const { stdout: configOutput } = await exec('cat', [`${OVPN_DIR}/server.conf`]);
+        const xorMatch = configOutput.match(/scramble xormask (\S+)/);
+        if (xorMatch?.[1]) {
+          result.xorMask = xorMatch[1];
+        }
+      } catch {
+        // Config doesn't exist
+      }
+
+      // Check if PKI exists
+      try {
+        await exec('test', ['-f', `${OVPN_DIR}/easy-rsa/pki/ca.crt`]);
+        result.pkiExists = true;
+      } catch {
+        // PKI doesn't exist
+      }
+
+      result.installed = result.binaryExists && result.configExists && result.pkiExists;
+    } catch {
+      // OpenVPN not installed
+    }
+
+    return result;
+  }
 }

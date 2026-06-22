@@ -783,7 +783,35 @@ async function createClient(name) {
   const certInfo = execSync(`openssl x509 -in /etc/openvpn/xor/easy-rsa/pki/issued/${name}.crt -noout -fingerprint -sha256`).toString();
   const fingerprint = certInfo.split('=')[1]?.trim() || '';
 
-  return { ovpnContent: Buffer.from(ovpnContent).toString('base64'), fingerprint };
+  return { ovpnContent: Buffer.from(ovpnContent).toString('base64'), fingerprint, name };
+}
+
+async function revokeClient(name) {
+  const { execSync } = await import('child_process');
+  execSync(`/root/ovpn-xor-admin/revoke-user.sh ${name}`);
+  return { success: true, name };
+}
+
+async function completeJob(jobId, success, result, errorMessage) {
+  try {
+    await axios.post(
+      `${PANEL_URL}/api/agent/jobs/${jobId}/complete`,
+      {
+        success,
+        result,
+        error: errorMessage
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      }
+    );
+  } catch (err) {
+    console.error(`     ✗ Failed to report job completion: ${err.message}`);
+  }
 }
 
 async function sendHeartbeat() {
@@ -824,14 +852,27 @@ async function sendHeartbeat() {
     if (jobs.length > 0) {
       console.log(`  → ${jobs.length} job(s)`);
       for (const job of jobs) {
-        console.log(`     Processing: ${job.type}`);
+        console.log(`     Processing: ${job.type} (${job.id})`);
 
         if (job.type === 'client-create' || job.type === 'CLIENT_CREATE') {
           try {
-            await createClient(job.payload?.clientName || job.payload?.name);
-            console.log(`     ✓ Client created`);
+            const clientName = job.payload?.clientName || job.payload?.name;
+            const result = await createClient(clientName);
+            await completeJob(job.id, true, { client: result });
+            console.log(`     ✓ Client ${clientName} created and reported`);
           } catch (e) {
             console.log(`     ✗ Failed: ${e.message}`);
+            await completeJob(job.id, false, null, e.message);
+          }
+        } else if (job.type === 'client-revoke' || job.type === 'CLIENT_REVOKE') {
+          try {
+            const clientName = job.payload?.clientName || job.payload?.name;
+            const result = await revokeClient(clientName);
+            await completeJob(job.id, true, result);
+            console.log(`     ✓ Client ${clientName} revoked and reported`);
+          } catch (e) {
+            console.log(`     ✗ Failed: ${e.message}`);
+            await completeJob(job.id, false, null, e.message);
           }
         }
       }

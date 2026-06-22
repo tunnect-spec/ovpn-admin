@@ -19,30 +19,8 @@ export async function processClientRevokeJob(job: Job<ClientRevokeJobData>) {
 
   const { clientId } = jobRecord.payload as { clientId: string };
 
-  // Update client status
-  await prisma.vpnClient.update({
-    where: { id: clientId },
-    data: {
-      status: 'REVOKED',
-      revokedAt: new Date(),
-    },
-  });
-
-  // Expire artifacts
-  await prisma.clientArtifact.updateMany({
-    where: { clientId },
-    data: { expiresAt: new Date() },
-  });
-
-  // Update job
-  await prisma.job.update({
-    where: { id: jobId },
-    data: {
-      status: 'COMPLETED',
-      completedAt: new Date(),
-      result: { revokedAt: new Date().toISOString() },
-    },
-  });
-
-  return { success: true };
+  // The worker should no longer process node-specific jobs.
+  // These jobs are processed by the Agent polling the database.
+  // If we reach here, it means a job was accidentally enqueued to BullMQ.
+  throw new Error('CLIENT_REVOKE jobs should be processed by the Agent, not the Worker.');
 }

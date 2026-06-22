@@ -100,13 +100,8 @@ export const DELETE = withAuth(async (request: NextRequest, payload, { params }:
       },
     });
 
-    // Enqueue job
-    await jobQueue.add('client-revoke', { jobId: job.id }, {
-      jobId: job.id,
-      priority: 8,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 30000 },
-    });
+    // Note: We DO NOT add this to jobQueue anymore.
+    // The Agent will pick up the PENDING job via its heartbeat loop.
 
     // Mark client as revoked (will be confirmed by job completion)
     await prisma.vpnClient.update({

@@ -130,6 +130,20 @@ export class Agent {
           result = await this.ops.sync();
           break;
 
+        case 'NODE_INSTALL':
+        case 'node-install':
+          // Check installation status and return real data
+          const installInfo = await this.ops.checkInstallation();
+          result = {
+            installed: installInfo.installed,
+            version: installInfo.version,
+            xorMask: installInfo.xorMask,
+            binaryExists: installInfo.binaryExists,
+            configExists: installInfo.configExists,
+            pkiExists: installInfo.pkiExists,
+          };
+          break;
+
         default:
           console.warn(`  Unknown job type: ${job.type}`);
           return;

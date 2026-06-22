@@ -26,76 +26,8 @@ export async function processClientCreateJob(job: Job<ClientCreateJobData>) {
     throw new Error('Node is not healthy');
   }
 
-  // For MVP: Generate a mock .ovpn file
-  const ovpnTemplate = `client
-dev tun
-proto udp
-
-remote ${node.host} 443
-
-resolv-retry infinite
-nobind
-
-persist-key
-persist-tun
-
-remote-cert-tls server
-
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-data-ciphers-fallback AES-256-GCM
-auth SHA256
-
-scramble xormask ${node.xorMask || 'defaultmask'}
-
-verb 3
-
-<ca>
------BEGIN CERTIFICATE-----
-MOCK_CA_CERTIFICATE_REPLACE_WITH_ACTUAL
------END CERTIFICATE-----
-</ca>
-
-<cert>
------BEGIN CERTIFICATE-----
-MOCK_CLIENT_CERTIFICATE_REPLACE_WITH_ACTUAL
------END CERTIFICATE-----
-</cert>
-
-<key>
------BEGIN PRIVATE KEY-----
-MOOCK_CLIENT_PRIVATE_KEY_REPLACE_WITH_ACTUAL
------END PRIVATE KEY-----
-</key>
-
-<tls-crypt>
-MOCK_TLS_CRYPT_KEY_REPLACE_WITH_ACTUAL
-</tls-crypt>
-`;
-
-  // Store artifact
-  await prisma.clientArtifact.create({
-    data: {
-      clientId,
-      nodeId: node.id,
-      artifactType: 'OVPN',
-      storagePath: ovpnTemplate,
-      contentHash: Array.from({ length: 32 }, () =>
-        '0123456789abcdef'[Math.floor(Math.random() * 16)]
-      ).join(''),
-      sizeBytes: ovpnTemplate.length,
-      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-    },
-  });
-
-  // Update job result
-  await prisma.job.update({
-    where: { id: jobId },
-    data: {
-      status: 'COMPLETED',
-      completedAt: new Date(),
-      result: { success: true, clientName },
-    },
-  });
-
-  return { success: true, clientName };
+  // The worker should no longer process node-specific jobs.
+  // These jobs are processed by the Agent polling the database.
+  // If we reach here, it means a job was accidentally enqueued to BullMQ.
+  throw new Error('CLIENT_CREATE jobs should be processed by the Agent, not the Worker.');
 }

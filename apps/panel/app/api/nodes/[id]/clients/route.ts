@@ -124,13 +124,8 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       },
     });
 
-    // Enqueue job
-    await jobQueue.add('client-create', { jobId: job.id }, {
-      jobId: job.id,
-      priority: 5,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 30000 },
-    });
+    // Note: We DO NOT add this to jobQueue anymore.
+    // The Agent will pick up the PENDING job via its heartbeat loop.
 
     // Audit log
     await prisma.auditLog.create({
