@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # OpenVPN Admin Panel - Complete Node Installation Script
-# Version: 3.1.1 - Fixed XOR patch URL for OpenVPN 2.7.4
+# Version: 3.1.3 - Using OpenVPN 2.5.9 with working XOR patches
 # =============================================================================
 
 set -e
@@ -15,7 +15,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # Configuration
-AGENT_VERSION="3.1.2"
+AGENT_VERSION="3.1.3"
 AGENT_DIR="/opt/ovpn-agent"
 REPO_URL="https://github.com/tunnect-spec/ovpn-admin"
 
@@ -28,7 +28,7 @@ if [[ -z "$REGISTRATION_TOKEN" ]]; then
     echo -e "${RED}✗ Error: AGENT_TOKEN is required${NC}"
     echo ""
     echo "This script installs:"
-    echo "  1. OpenVPN 2.7.3 with XOR patch"
+    echo "  1. OpenVPN 2.5.9 with XOR patch"
     echo "  2. OpenVPN Admin Agent"
     echo "  3. All required dependencies"
     echo ""
@@ -52,7 +52,7 @@ echo "║     OpenVPN XOR - Complete Node Installation                     ║"
 echo "║                    Version ${AGENT_VERSION}                               ║"
 echo "║                                                                  ║"
 echo "║  This will install:                                              ║"
-echo "║    • OpenVPN 2.7.3 with XOR patch                                ║"
+echo "║    • OpenVPN 2.5.9 with XOR patch                                ║"
 echo "║    • easy-rsa PKI infrastructure                                 ║"
 echo "║    • Admin Agent for panel communication                         ║"
 echo "║    • Systemd services                                           ║"
@@ -185,7 +185,7 @@ fi
 # Build OpenVPN XOR
 echo ""
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${MAGENTA}  Building OpenVPN 2.7.3 with XOR patch...${NC}"
+echo -e "${MAGENTA}  Building OpenVPN 2.5.9 with XOR patch...${NC}"
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -194,9 +194,9 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-echo -e "${CYAN}[Step 4/10]${NC} Downloading OpenVPN ${OVPN_VERSION:-2.7.3}..."
+echo -e "${CYAN}[Step 4/10]${NC} Downloading OpenVPN 2.5.9..."
 
-OVPN_VERSION="${OVPN_VERSION:-2.7.3}"
+OVPN_VERSION="2.5.9"
 
 if [ ! -f "openvpn-${OVPN_VERSION}.tar.gz" ]; then
     wget -q "https://swupdate.openvpn.org/community/releases/openvpn-${OVPN_VERSION}.tar.gz" || {
@@ -213,7 +213,7 @@ echo -e "  ${GREEN}✓ Source ready${NC}"
 echo -e "${CYAN}[Step 5.5/10]${NC} Applying XOR patch..."
 
 # Download and apply Tunnelblick XOR patches
-PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-2.7.4/patches"
+PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-${OVPN_VERSION}/patches"
 PATCHES=(
     "02-tunnelblick-openvpn_xorpatch-a.diff"
     "03-tunnelblick-openvpn_xorpatch-b.diff"
