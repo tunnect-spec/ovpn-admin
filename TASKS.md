@@ -50,6 +50,7 @@
 ## 🎯 Current Status
 
 **Production Ready: YES ✅**
+**Latest Version: v3.1.0**
 
 Every node installed will have:
 - ✅ OpenVPN 2.7.3 with XOR patch
@@ -59,6 +60,32 @@ Every node installed will have:
 - ✅ Client creation/revocation scripts
 - ✅ Automatic firewall configuration
 - ✅ Job completion reporting
+
+## 🚀 Deployment
+
+### On Panel Server (185.226.93.222)
+
+```bash
+cd /root/ovpn
+./deploy.sh
+```
+
+Or manually:
+```bash
+git pull origin main
+pnpm install
+pnpm build:panel
+pm2 restart ovpn-panel
+```
+
+### On VPN Node (91.107.154.238)
+
+```bash
+curl -fsSL https://therockybalbo.xyz/api/agent/install.sh | \
+  AGENT_TOKEN=<token_from_panel> \
+  PANEL_URL=https://therockybalbo.xyz \
+  bash
+```
 
 ## 📋 Completed Features
 
@@ -85,16 +112,6 @@ Every node installed will have:
 - [x] Automatic firewall rules
 - [x] Automatic agent updates
 
-## 🚀 Quick Start
-
-```bash
-# On VPN server:
-curl -fsSL <PANEL_URL>/api/agent/install.sh | \
-  AGENT_TOKEN=<token> PANEL_URL=<url> bash
-```
-
-This installs EVERYTHING needed - no empty nodes!
-
 ## 📝 Version History
 
 ### v3.1.0 (Current)
@@ -102,6 +119,7 @@ This installs EVERYTHING needed - no empty nodes!
 - Agent reports job results to panel
 - Automatic firewall configuration
 - Client artifacts stored on creation
+- Deployment script added
 
 ### v3.0.0
 - Automatic OpenVPN XOR installation
