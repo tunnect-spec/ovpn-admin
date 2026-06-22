@@ -48,10 +48,30 @@ Self-hosted admin panel for managing OpenVPN XOR nodes.
 - Node.js 20+ (for local development)
 - VPN server(s) with Ubuntu 22.04/24.04
 
-### 1. Clone & Setup
+### Option A: Install from GitHub (Recommended for Production)
 
 ```bash
-git clone <repo>
+# Quick install with auto-configuration
+curl -fsSL https://raw.githubusercontent.com/tunnect-spec/ovpn-admin/main/quick-install.sh | sudo bash
+
+# Or with custom domain
+curl -fsSL https://raw.githubusercontent.com/tunnect-spec/ovpn-admin/main/quick-install.sh | \
+  sudo DOMAIN=vpn.example.com bash
+```
+
+This will:
+- Install Docker & Docker Compose
+- Generate secure secrets
+- Set up PostgreSQL + Redis
+- Build and start all services
+- Create admin user with generated password
+
+### Option B: Manual Installation
+
+#### 1. Clone & Setup
+
+```bash
+git clone https://github.com/tunnect-spec/ovpn-admin.git
 cd ovpn-admin
 cp .env.example .env
 # Edit .env with your settings
