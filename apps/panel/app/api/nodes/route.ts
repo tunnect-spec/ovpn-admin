@@ -46,7 +46,7 @@ async function GET_handler(request: NextRequest, payload: any) {
     ]);
 
     return NextResponse.json({
-      nodes: nodes.map((n) => ({
+      nodes: nodes.map((n: any) => ({
         ...n,
         lastHeartbeatAt: n.lastHeartbeatAt?.toISOString() ?? null,
         createdAt: n.createdAt.toISOString(),

@@ -30,7 +30,7 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
     ]);
 
     return NextResponse.json({
-      jobs: jobs.map((j) => ({
+      jobs: jobs.map((j: any) => ({
         id: j.id,
         type: j.type,
         status: j.status,

@@ -42,7 +42,7 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
     ]);
 
     return NextResponse.json({
-      logs: logs.map((log) => ({
+      logs: logs.map((log: any) => ({
         id: log.id,
         adminId: log.adminId,
         adminEmail: log.admin?.email ?? null,
