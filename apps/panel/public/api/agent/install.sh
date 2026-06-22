@@ -9,6 +9,7 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Required environment variables
@@ -19,17 +20,22 @@ if [[ -z "$AGENT_TOKEN" ]]; then
 fi
 
 if [[ -z "$PANEL_URL" ]]; then
-    echo -e "${YELLOW}Warning: PANEL_URL not set, using default${NC}"
-    PANEL_URL="https://panel.example.com"
+    echo -e "${RED}Error: PANEL_URL environment variable is required${NC}"
+    echo "Usage: curl -fsSL <PANEL_URL>/api/agent/install.sh | AGENT_TOKEN=xxx PANEL_URL=xxx bash"
+    exit 1
 fi
 
-echo -e "${GREEN}📦 Installing OpenVPN Agent${NC}"
-echo "Panel URL: $PANEL_URL"
+echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   OpenVPN Admin Panel - Agent Install    ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "${BLUE}Panel URL:${NC} $PANEL_URL"
+echo -e "${BLUE}Agent Token:${NC} ${AGENT_TOKEN:0:8}..."
 echo ""
 
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}This script must be run as root${NC}"
+   echo -e "${RED}✗ This script must be run as root${NC}"
    echo "Please use: sudo bash"
    exit 1
 fi
@@ -40,220 +46,228 @@ if [ -f /etc/os-release ]; then
     OS=$ID
     OS_VERSION=$VERSION_ID
 else
-    echo -e "${RED}Cannot detect OS${NC}"
+    echo -e "${RED}✗ Cannot detect OS${NC}"
     exit 1
 fi
 
-echo "Detected OS: $OS $OS_VERSION"
+echo -e "${YELLOW}[1/5] Detected OS:${NC} $OS $OS_VERSION"
 
-# Install dependencies based on OS
+# Install dependencies
+echo -e "${YELLOW}[2/5] Installing dependencies...${NC}"
+
 if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
-    echo -e "${GREEN}Installing dependencies...${NC}"
-    apt-get update -qq
-    apt-get install -y curl wget openssl ca-certificates
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq 2>/dev/null
+    apt-get install -y curl wget ca-certificates 2>/dev/null
 
     # Install Node.js 20.x
-    if ! command -v node &> /dev/null; then
-        echo "Installing Node.js 20.x..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        apt-get install -y nodejs
+    if ! command -v node &> /dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1) -lt 18 ]; then
+        echo "  Installing Node.js 20.x..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null
+        apt-get install -y nodejs 2>/dev/null
     fi
-elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]]; then
-    echo -e "${GREEN}Installing dependencies...${NC}"
-    yum install -y curl wget openssl ca-certificates
+elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]] || [[ "$OS" == "rocky" ]] || [[ "$OS" == "almalinux" ]]; then
+    yum install -y curl wget ca-certificates 2>/dev/null
 
-    # Install Node.js 20.x
-    if ! command -v node &> /dev/null; then
-        echo "Installing Node.js 20.x..."
+    if ! command -v node &> /dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1) -lt 18 ]; then
+        echo "  Installing Node.js 20.x..."
         curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
         yum install -y nodejs
     fi
 else
-    echo -e "${RED}Unsupported OS: $OS${NC}"
+    echo -e "${RED}✗ Unsupported OS: $OS${NC}"
     exit 1
 fi
 
-# Verify Node.js version
-NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    echo -e "${RED}Node.js 18+ required. Current version: $(node -v)${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}Node.js version: $(node -v)${NC}"
+NODE_VERSION=$(node -v)
+echo -e "${GREEN}  ✓ Node.js $NODE_VERSION installed${NC}"
 
 # Create agent directory
 AGENT_DIR="/opt/ovpn-agent"
+echo -e "${YELLOW}[3/5] Creating agent in $AGENT_DIR...${NC}"
+
+rm -rf "$AGENT_DIR"
 mkdir -p "$AGENT_DIR"
 cd "$AGENT_DIR"
 
-# Download agent from panel
-echo -e "${GREEN}Downloading agent package...${NC}"
-AGENT_PACKAGE_URL="$PANEL_URL/api/agent/package.tar.gz"
-
-if curl -fsSL "$AGENT_PACKAGE_URL" -o agent-package.tar.gz; then
-    echo "Package downloaded successfully"
-else
-    echo -e "${YELLOW}Package download failed, installing minimal agent...${NC}"
-
-    # Create minimal agent inline
-    cat > package.json << 'EOFPACKAGE'
+# Create package.json
+cat > package.json << 'EOFPACKAGE'
 {
   "name": "ovpn-agent",
   "version": "1.0.0",
   "type": "module",
+  "description": "OpenVPN Admin Panel Agent",
   "dependencies": {
-    "axios": "^1.6.0",
-    "node-cron": "^3.0.3"
+    "axios": "^1.6.5"
   }
 }
 EOFPACKAGE
 
-    # Create agent index
-    cat > index.js << 'EOFAGENT'
+# Create agent index.js
+cat > index.js << 'EOFAGENT'
 import axios from 'axios';
-import cron from 'node-cron';
 
-const PANEL_URL = process.env.PANEL_URL || 'https://panel.example.com';
-const AGENT_TOKEN = process.env.AGENT_TOKEN || '';
+const PANEL_URL = process.env.PANEL_URL;
+const AGENT_TOKEN = process.env.AGENT_TOKEN;
 
-const AGENT_CONFIG = {
-  heartbeatInterval: parseInt(process.env.AGENT_HEARTBEAT_INTERVAL || '30', 10) * 1000,
-  heartbeatTimeout: parseInt(process.env.AGENT_HEARTBEAT_TIMEOUT || '5', 10) * 1000,
-};
+const HEARTBEAT_INTERVAL = 30000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 10000; // 10 seconds
+
+let heartbeatCount = 0;
+let successCount = 0;
+let lastError = null;
 
 async function sendHeartbeat() {
+  heartbeatCount++;
+  const startTime = Date.now();
+
   try {
     const response = await axios.post(
       `${PANEL_URL}/api/agent/heartbeat`,
       {
-        timestamp: Date.now(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
+        timestamp: startTime,
+        uptime: Math.floor(process.uptime()),
+        memory: {
+          rss: process.memoryUsage().rss,
+          heapTotal: process.memoryUsage().heapTotal,
+          heapUsed: process.memoryUsage().heapUsed,
+        },
+        platform: process.platform,
+        nodeVersion: process.version,
+        heartbeatCount,
+        successCount,
       },
       {
         headers: {
           'Authorization': `Bearer ${AGENT_TOKEN}`,
           'Content-Type': 'application/json',
         },
-        timeout: AGENT_CONFIG.heartbeatTimeout,
+        timeout: HEARTBEAT_TIMEOUT,
       }
     );
 
-    if (response.data?.status === 'ok') {
-      console.log('✓ Heartbeat sent successfully');
+    successCount++;
+    lastError = null;
+    const duration = Date.now() - startTime;
 
-      // Process commands from panel
-      if (response.data?.commands?.length > 0) {
-        for (const cmd of response.data.commands) {
-          await processCommand(cmd);
-        }
+    console.log(`✓ Heartbeat #${heartbeatCount} (${duration}ms) - Status: OK`);
+
+    if (response.data?.pendingJobs?.length > 0) {
+      console.log(`  → ${response.data.pendingJobs.length} pending job(s)`);
+      for (const job of response.data.pendingJobs) {
+        console.log(`     - ${job.type} (id: ${job.id})`);
       }
     }
+
+    return true;
   } catch (error) {
-    if (error.response?.status === 401) {
-      console.error('✗ Authentication failed. Check AGENT_TOKEN.');
-      process.exit(1);
+    if (error.response) {
+      if (error.response.status === 401) {
+        console.error('✗ Authentication failed - AGENT_TOKEN is invalid');
+        console.error('  Please re-register the node from the panel');
+        process.exit(1);
+      }
+      if (error.response.status === 404) {
+        console.error('✗ Node not found on panel');
+        console.error('  Please re-register the node from the panel');
+        process.exit(1);
+      }
+      lastError = `HTTP ${error.response.status}`;
+    } else if (error.request) {
+      lastError = 'Network unreachable';
+    } else {
+      lastError = error.message;
     }
-    console.error('Heartbeat error:', error.message);
+
+    console.error(`✗ Heartbeat #${heartbeatCount} failed: ${lastError}`);
+    return false;
   }
 }
 
-async function processCommand(command) {
-  console.log(`Processing command: ${command.type}`);
+async function start() {
+  console.log('');
+  console.log('╔══════════════════════════════════════════╗');
+  console.log('║     OpenVPN Admin Panel Agent v1.0.0     ║');
+  console.log('╚══════════════════════════════════════════╝');
+  console.log('');
+  console.log(`Panel:    ${PANEL_URL}`);
+  console.log(`Interval: ${HEARTBEAT_INTERVAL / 1000}s`);
+  console.log('');
 
-  try {
-    let result;
+  // Send initial heartbeat to verify connection
+  console.log('Testing connection to panel...');
+  const firstBeat = await sendHeartbeat();
 
-    switch (command.type) {
-      case 'create-client':
-        result = await createClient(command.data);
-        break;
-      case 'revoke-client':
-        result = await revokeClient(command.data);
-        break;
-      case 'install-openvpn':
-        result = await installOpenVPN(command.data);
-        break;
-      default:
-        console.log(`Unknown command: ${command.type}`);
-        return;
-    }
-
-    // Report result
-    await axios.post(
-      `${PANEL_URL}/api/agent/command-result`,
-      {
-        commandId: command.id,
-        status: 'success',
-        result,
-      },
-      {
-        headers: { 'Authorization': `Bearer ${AGENT_TOKEN}` },
-      }
-    );
-
-    console.log(`✓ Command ${command.type} completed`);
-  } catch (error) {
-    console.error(`Command ${command.type} failed:`, error.message);
+  if (!firstBeat) {
+    console.error('');
+    console.error('✗ Initial heartbeat failed');
+    console.error('');
+    console.error('Troubleshooting:');
+    console.error('  1. Check PANEL_URL is correct');
+    console.error('  2. Verify AGENT_TOKEN is valid');
+    console.error('  3. Ensure network connectivity to panel');
+    console.error('  4. Check panel is running');
+    console.error('');
+    process.exit(1);
   }
+
+  console.log('');
+  console.log('✓ Agent registered successfully!');
+  console.log('✓ Starting heartbeat loop...');
+  console.log('');
+
+  // Start heartbeat interval
+  setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
 }
 
-async function createClient(data) {
-  const { name } = data;
-  // Implementation depends on OpenVPN setup
-  return { clientName: name, config: 'pending' };
-}
-
-async function revokeClient(data) {
-  const { name } = data;
-  // Implementation depends on OpenVPN setup
-  return { clientName: name, revoked: true };
-}
-
-async function installOpenVPN(data) {
-  // OpenVPN XOR installation
-  return { installed: true };
-}
-
-// Start heartbeat
-console.log(`Agent started. Heartbeat every ${AGENT_CONFIG.heartbeatInterval / 1000}s`);
-
-// Send first heartbeat immediately
-sendHeartbeat();
-
-// Schedule regular heartbeats
-setInterval(sendHeartbeat, AGENT_CONFIG.heartbeatInterval);
-
-// Handle graceful shutdown
+// Handle shutdown
 process.on('SIGTERM', () => {
+  console.log('');
   console.log('Agent shutting down...');
   process.exit(0);
 });
+
+process.on('SIGINT', () => {
+  console.log('');
+  console.log('Agent shutting down...');
+  process.exit(0);
+});
+
+// Start the agent
+start().catch(err => {
+  console.error('Failed to start agent:', err);
+  process.exit(1);
+});
 EOFAGENT
 
-    npm install --production --silent
-fi
+# Install dependencies
+echo -e "${YELLOW}[4/5] Installing dependencies...${NC}"
+npm install --production --silent --no-audit --no-fund 2>/dev/null
+
+echo -e "${GREEN}  ✓ Dependencies installed${NC}"
 
 # Create systemd service
-echo -e "${GREEN}Creating systemd service...${NC}"
+echo -e "${YELLOW}[5/5] Creating systemd service...${NC}"
 
 cat > /etc/systemd/system/ovpn-agent.service << EOF
 [Unit]
-Description=OpenVPN Admin Agent
+Description=OpenVPN Admin Panel Agent
+Documentation=https://github.com/tunnect-spec/ovpn-admin
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=$AGENT_DIR
+Environment="NODE_ENV=production"
 Environment="PANEL_URL=$PANEL_URL"
 Environment="AGENT_TOKEN=$AGENT_TOKEN"
-Environment="AGENT_HEARTBEAT_INTERVAL=30"
-Environment="AGENT_HEARTBEAT_TIMEOUT=5"
 ExecStart=/usr/bin/node $AGENT_DIR/index.js
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ovpn-agent
 
 [Install]
 WantedBy=multi-user.target
@@ -261,25 +275,35 @@ EOF
 
 # Reload systemd
 systemctl daemon-reload
-systemctl enable ovpn-agent
+systemctl enable ovpn-agent 2>/dev/null
+
+# Stop any existing agent
+systemctl stop ovpn-agent 2>/dev/null || true
 
 # Start agent
-echo -e "${GREEN}Starting agent...${NC}"
 systemctl start ovpn-agent
 
-# Wait a moment and check status
+# Wait and check status
 sleep 3
+
 if systemctl is-active --quiet ovpn-agent; then
-    echo -e "${GREEN}✓ Agent installed and running!${NC}"
+    echo -e "${GREEN}  ✓ Service created and enabled${NC}"
     echo ""
-    echo "Service commands:"
-    echo "  systemctl status ovpn-agent  - Check status"
-    echo "  systemctl stop ovpn-agent     - Stop agent"
-    echo "  systemctl start ovpn-agent    - Start agent"
-    echo "  journalctl -u ovpn-agent     - View logs"
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║         ✓ Agent Installed Successfully!     ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BLUE}Service Commands:${NC}"
+    echo "  systemctl status ovpn-agent   - Check status"
+    echo "  journalctl -u ovpn-agent      - View logs"
+    echo "  journalctl -u ovpn-agent -f  - Follow logs"
     echo ""
 else
-    echo -e "${RED}✗ Agent failed to start. Check logs:${NC}"
-    echo "  journalctl -u ovpn-agent -n 50"
+    echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║         ✗ Agent Failed to Start          ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    echo "Check logs: journalctl -u ovpn-agent -n 50"
+    echo ""
     exit 1
 fi
