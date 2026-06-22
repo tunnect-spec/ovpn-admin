@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # OpenVPN Admin Panel - Complete Node Installation Script
-# Version: 3.1.0 - Production Ready with Firewall Configuration
+# Version: 3.1.1 - Fixed systemd service timeout
 # =============================================================================
 
 set -e
@@ -15,7 +15,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # Configuration
-AGENT_VERSION="3.1.0"
+AGENT_VERSION="3.1.1"
 AGENT_DIR="/opt/ovpn-agent"
 REPO_URL="https://github.com/tunnect-spec/ovpn-admin"
 
@@ -367,19 +367,20 @@ else
     echo -e "  ${YELLOW}⚠ Config created without XOR (patch not applied)${NC}"
 fi
 
-# Create systemd service
+# Create systemd service (Type=simple for proper foreground operation)
 cat > /etc/systemd/system/openvpn-xor.service << EOFSVC
 [Unit]
 Description=OpenVPN XOR Server
 After=network.target
 
 [Service]
-Type=forking
-ExecStart=/usr/local/sbin/openvpn --config $OVPN_DIR/server.conf
+Type=simple
+ExecStart=/usr/local/sbin/openvpn --config $OVPN_DIR/server.conf --writepid /run/openvpn-xor.pid
 ExecReload=/bin/kill -HUP \$MAINPID
-PIDFile=/var/run/openvpn-xor.pid
+PIDFile=/run/openvpn-xor.pid
 Restart=always
 RestartSec=5
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target
