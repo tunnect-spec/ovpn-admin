@@ -260,16 +260,13 @@ async function sendHeartbeat() {
       {
         timestamp: startTime,
         uptime: Math.floor(process.uptime()),
-        memory: {
-          rss: process.memoryUsage().rss,
-          heapTotal: process.memoryUsage().heapTotal,
-          heapUsed: process.memoryUsage().heapUsed,
+        status: 'RUNNING',
+        details: {
+          connectedClients: 0,
+          cpu: 0,
+          memory: 0,
+          disk: 0,
         },
-        platform: process.platform,
-        nodeVersion: process.version,
-        agentVersion: '2.1.0',
-        heartbeatCount,
-        successCount,
       },
       {
         headers: {
