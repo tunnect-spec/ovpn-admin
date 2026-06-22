@@ -284,13 +284,45 @@ echo -e "${CYAN}[Step 8/10]${NC} Setting up PKI infrastructure..."
 
 OVPN_DIR="/etc/openvpn/xor"
 ADMIN_DIR="/root/ovpn-xor-admin"
-SERVER_IP="$(curl -s -4 --max-time 5 ifconfig.me 2>/dev/null || curl -s -4 --max-time 5 icanhazip.com 2>/dev/null || hostname -I | awk '{print $1}')"
+
+# Detect server IP with multiple fallback methods
+SERVER_IP=""
+
+# Method 1: Check if SERVER_IP is already set (from environment)
+if [[ -n "$SERVER_IP" && "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    : # Already set and valid
+# Method 2: Get from registration response (saved during registration)
+elif [[ -f "/tmp/ovpn-node-host" ]]; then
+    SERVER_IP="$(cat /tmp/ovpn-node-host)"
+# Method 3: External services
+else
+    SERVER_IP="$(
+        curl -s -4 --max-time 5 ifconfig.me 2>/dev/null || \
+        curl -s -4 --max-time 5 icanhazip.com 2>/dev/null || \
+        curl -s -4 --max-time 5 ipinfo.io/ip 2>/dev/null || \
+        hostname -I 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {print $i; exit}}' || \
+        ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1 || \
+        ip addr show 2>/dev/null | grep inet | grep -v 127.0.0.1 | head -1 | awk '{print $2}' | cut -d'/' -f1
+    )"
+fi
 
 # Validate SERVER_IP
-if [[ -z "$SERVER_IP" ]] || [[ "$SERVER_IP" == "SERVER_IP" ]] || ! [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ -z "$SERVER_IP" ]] || ! [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "${RED}✗ Cannot detect server IP address${NC}"
-    echo "Please ensure internet connectivity or set SERVER_IP manually"
-    exit 1
+    echo "Methods tried: external services, hostname, ip command"
+    echo "Please set SERVER_IP manually or check internet connectivity"
+    echo ""
+    echo "Current detected value: '$SERVER_IP'"
+    echo "Trying fallback methods..."
+
+    # Last resort: use first non-loopback interface
+    SERVER_IP="$(ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1)"
+
+    if [[ -z "$SERVER_IP" ]] || ! [[ "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        exit 1
+    else
+        echo -e "${GREEN}✓ Using detected IP: $SERVER_IP${NC}"
+    fi
 fi
 
 rm -rf "$OVPN_DIR" "$ADMIN_DIR"
