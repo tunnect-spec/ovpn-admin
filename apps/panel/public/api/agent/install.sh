@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # OpenVPN Admin Panel - Complete Node Installation Script
-# Version: 3.1.1 - Fixed systemd service timeout
+# Version: 3.1.1 - Fixed XOR patch URL for OpenVPN 2.7.4
 # =============================================================================
 
 set -e
@@ -15,7 +15,7 @@ MAGENTA='\033[0;35m'
 NC='\033[0m'
 
 # Configuration
-AGENT_VERSION="3.1.1"
+AGENT_VERSION="3.1.2"
 AGENT_DIR="/opt/ovpn-agent"
 REPO_URL="https://github.com/tunnect-spec/ovpn-admin"
 
@@ -213,7 +213,7 @@ echo -e "  ${GREEN}✓ Source ready${NC}"
 echo -e "${CYAN}[Step 5.5/10]${NC} Applying XOR patch..."
 
 # Download and apply Tunnelblick XOR patches
-PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-2.5.9/patches"
+PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-2.7.4/patches"
 PATCHES=(
     "02-tunnelblick-openvpn_xorpatch-a.diff"
     "03-tunnelblick-openvpn_xorpatch-b.diff"
