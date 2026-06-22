@@ -263,7 +263,7 @@ echo "  {CA_creation_started}"
 ./easyrsa --batch build-ca nopass > /dev/null 2>&1
 echo "  {CA_created}"
 
-yes "" | ./easyrsa build-server-full server nopass > /dev/null 2>&1
+yes yes | ./easyrsa build-server-full server nopass > /dev/null 2>&1
 echo "  {Server_cert_created}"
 
 ./easyrsa gen-crl > /dev/null 2>&1
@@ -409,7 +409,7 @@ USER="\$1"
 OVPN_DIR="/etc/openvpn/xor"
 ADMIN_DIR="/root/ovpn-xor-admin"
 cd "\$OVPN_DIR/easy-rsa"
-yes "" | ./easyrsa build-client-full "\$USER" nopass > /dev/null 2>&1
+yes yes | ./easyrsa build-client-full "\$USER" nopass > /dev/null 2>&1
 SERVER_IP="\$(curl -s -4 ifconfig.me || echo 'SERVER_IP')"
 XOR_MASK="\$(cat \$OVPN_DIR/xormask.txt 2>/dev/null || echo 'default')"
 cat > "\$ADMIN_DIR/clients/\$USER.ovpn" << EOF
