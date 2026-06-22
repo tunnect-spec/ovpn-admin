@@ -92,25 +92,22 @@ if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
 
-    apt-get install -y \
-        build-essential \
-        libssl-dev \
-        libpam0g-dev \
-        liblz4-dev \
-        git \
-        wget \
-        curl \
-        ca-certificates \
-        uuid-runtime \
-        nodejs \
-        npm \
-        iptables-persistent 2>/dev/null || true
+    # Install critical build dependencies first (must succeed)
+    apt-get install -y build-essential libssl-dev libpam0g-dev liblz4-dev
+
+    # Install other dependencies (npm may fail, not critical)
+    apt-get install -y git wget curl ca-certificates uuid-runtime nodejs npm 2>/dev/null || true
+
+    # Install iptables-persistent with auto-accept (non-interactive)
+    echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | debconf-set-selections
+    echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | debconf-set-selections
+    apt-get install -y iptables-persistent 2>/dev/null || true
 
     # Ensure Node.js 20.x
     if ! command -v node &> /dev/null || [ $(node -v | cut -d'v' -f2 | cut -d'.' -f1) -lt 18 ]; then
         echo "  Installing Node.js 20.x..."
         curl -fsSL https://deb.nodesource.com/setup_20.x | bash - 2>/dev/null
-        apt-get install -y nodejs 2>/dev/null
+        apt-get install -y nodejs 2>/dev/null || true
     fi
 elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]] || [[ "$OS" == "rocky" ]] || [[ "$OS" == "almalinux" ]]; then
     yum install -y \
