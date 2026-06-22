@@ -144,7 +144,7 @@ echo ""
 
 # Validate and get admin email
 while true; do
-  read -p "Enter admin email: " ADMIN_EMAIL
+  read -p "Enter admin email: " ADMIN_EMAIL < /dev/tty
   if [[ "$ADMIN_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
     break
   else
@@ -154,10 +154,10 @@ done
 
 # Validate and get admin password
 while true; do
-  read -s -p "Enter admin password (min 8 characters): " ADMIN_PASSWORD
+  read -s -p "Enter admin password (min 8 characters): " ADMIN_PASSWORD < /dev/tty
   echo ""
   if [[ ${#ADMIN_PASSWORD} -ge 8 ]]; then
-    read -s -p "Confirm admin password: " ADMIN_PASSWORD_CONFIRM
+    read -s -p "Confirm admin password: " ADMIN_PASSWORD_CONFIRM < /dev/tty
     echo ""
     if [[ "$ADMIN_PASSWORD" == "$ADMIN_PASSWORD_CONFIRM" ]]; then
       break
