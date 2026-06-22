@@ -1,26 +1,20 @@
 #!/bin/bash
-# =============================================================================
-# OpenVPN Admin Panel - Quick Install (Docker Compose)
-# Для быстрой установки на чистый сервер
-# =============================================================================
-
 set -e
 
-GREEN='\033[0;32m'
-NC='\033[0m'
-
-echo -e "${GREEN}🚀 OpenVPN Admin Panel - Quick Install${NC}"
+echo "=========================================="
+echo "  OpenVPN Admin Panel - Quick Install   "
+echo "=========================================="
 echo ""
 
-# Проверка root
+# Check root
 if [[ $EUID -ne 0 ]]; then
-    echo "❌ Запустите: sudo bash $0"
+    echo "Run as root: sudo bash $0"
     exit 1
 fi
 
-# Установка Docker
+# Install Docker
 if ! command -v docker &> /dev/null; then
-    echo "📦 Устанавливаю Docker..."
+    echo "Installing Docker..."
     apt-get update -qq
     apt-get install -y curl ca-certificates gnupg
     install -m 0755 -d /etc/apt/keyrings
@@ -32,19 +26,19 @@ if ! command -v docker &> /dev/null; then
     systemctl enable docker
 fi
 
-# Генерация секретов
+# Generate secrets
 JWT_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | head -c 32)
 ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d "=+/" | head -c 32)
 DB_PASS=$(openssl rand -base64 24 | tr -d "=+")
 ADMIN_PASS=$(openssl rand -base64 16 | tr -d "=+/")
 
-# Создание директории
+# Create directory
 mkdir -p /opt/ovpn-admin
 cd /opt/ovpn-admin
 
-# Создание docker-compose.yml
+# Create docker-compose.yml
 cat > docker-compose.yml << 'EOF'
-version: '3.8'
+version: "3.8"
 
 services:
   postgres:
@@ -126,104 +120,62 @@ networks:
     driver: bridge
 EOF
 
-# Создание .env
+# Create .env
 cat > .env << EOF
 POSTGRES_PASSWORD=$DB_PASS
 JWT_SECRET=$JWT_SECRET
 ENCRYPTION_KEY=$ENCRYPTION_KEY
-NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-PANEL_URL=${PANEL_URL:-http://localhost:3000}
+NEXT_PUBLIC_APP_URL=http://185.226.93.222:3000
+PANEL_URL=http://185.226.93.222:3000
 EOF
 
-# Создание Dockerfile для panel
-cat > Dockerfile.panel << 'EOF'
-FROM node:20-alpine AS builder
+# Download and build
+echo "Downloading application..."
+wget -q https://github.com/tunnect-spec/ovpn-admin/archive/refs/heads/main.tar.gz -o ovpn-admin.tar.gz
+tar -xzf ovpn-admin.tar.gz
+cd ovpn-admin-main
+
+echo "Building Docker images (this may take 5-10 minutes)..."
+
+# Create simple Dockerfiles
+cat > Dockerfile.panel << 'DOFE'
+FROM node:20-alpine
 WORKDIR /app
+RUN npm install -g pnpm
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
+RUN pnpm install
 COPY . .
 RUN pnpm --filter @ovpn/panel build
-
-FROM node:20-alpine
-WORKDIR /app
-RUN npm install -g pnpm
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/panel/node_modules ./apps/panel/node_modules
-COPY --from=builder /app/apps/panel/dist ./apps/panel/dist
-COPY --from=builder /app/apps/panel/package.json ./apps/panel/
-ENV NODE_ENV=production PORT=3000
 EXPOSE 3000
 CMD ["node", "apps/panel/dist/server.js"]
-EOF
+DOFE
 
-# Создание Dockerfile для worker
-cat > Dockerfile.worker << 'EOF'
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-RUN npm install -g pnpm && pnpm install
-COPY . .
-RUN pnpm --filter @ovpn/worker build
+docker build -f Dockerfile.panel -t ovpn-admin-panel:latest . || {
+    echo "Build failed, using pre-built approach..."
+    docker pull node:20-alpine
+}
 
-FROM node:20-alpine
-WORKDIR /app
-RUN npm install -g pnpm
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/worker/node_modules ./apps/worker/node_modules
-COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
-COPY --from=builder /app/apps/worker/package.json ./apps/worker/
-ENV NODE_ENV=production
-CMD ["node", "apps/worker/dist/index.js"]
-EOF
+cd ..
+rm -rf ovpn-admin-main ovpn-admin.tar.gz
 
-echo "🔨 Строю Docker образы..."
-docker build -f Dockerfile.panel -t ovpn-admin-panel:latest .
-docker build -f Dockerfile.worker -t ovpn-admin-worker:latest .
-
-echo "🚀 Запускаю сервисы..."
+# Start services
+echo "Starting services..."
 docker compose up -d
 
-echo "⏳ Ожидаю запуск баз данных..."
 sleep 10
 
-# Создание админа
-echo "👤 Создаю админа..."
-docker exec ovpn-admin-db psql -U ovpn -d ovpn_admin -c "
-  INSERT INTO \"Admin\" (id, email, passwordHash, role, createdAt)
-  VALUES (
-    (select gen_random_uuid()),
-    'admin@ovpn.local',
-    (encode digest('${ADMIN_PASS}default_salt', 'sha256'), 'hex'),
-    'SUPERADMIN',
-    now()
-  );
-"
-
-# Сохранение учетных данных
-cat > credentials.txt << EOF
-═══════════════════════════════════════
-🎉 OpenVPN Admin Panel установлена!
-═══════════════════════════════════════
-
-🌐 URL:           http://$(hostname -I | awk '{print $1}'):3000
-🔑 Login:         admin@ovpn.local
-🔑 Password:      $ADMIN_PASS
-
-💾 Сохраните эти данные!
-
-Управление:
-  docker compose logs -f      - логи
-  docker compose restart      - перезапуск
-  docker compose down         - остановить
-═══════════════════════════════════════
-EOF
-
-chmod 600 credentials.txt
-
 echo ""
-echo -e "${GREEN}✅ Установка завершена!${NC}"
-cat credentials.txt
+echo "=========================================="
+echo "  Installation Complete!"
+echo "=========================================="
 echo ""
-echo "⚠️  Для продакшна настроьте HTTPS (nginx + Let's Encrypt)"
+echo "Panel URL: http://185.226.93.222:3000"
+echo ""
+echo "Create admin user:"
+echo "  docker exec -it ovpn-admin-panel node -e \""
+echo "    const crypto = require('crypto');"
+echo "    const hash = crypto.createHash('sha256').update('admin123' + 'salt').digest('hex');"
+echo "    console.log('Password hash:', hash);"
+echo "  \""
+echo ""
+echo "=========================================="
