@@ -222,12 +222,12 @@ PATCHES=(
     "06-tunnelblick-openvpn_xorpatch-e.diff"
 )
 
-PATCH Applied=0
+PATCH_Applied=0
 for patch in "${PATCHES[@]}"; do
     echo "  Downloading $patch..."
     if wget -q "$PATCH_BASE/$patch" -O "/tmp/$patch"; then
         if patch -p1 --dry-run < "/tmp/$patch" > /dev/null 2>&1; then
-            patch -p1 < "/tmp/$patch" && PATCH Applied=1 && echo "  ✓ Applied $patch"
+            patch -p1 < "/tmp/$patch" && PATCH_Applied=1 && echo "  ✓ Applied $patch"
         else
             echo "  ⚠ Patch $patch not compatible, skipping"
         fi
@@ -237,7 +237,7 @@ for patch in "${PATCHES[@]}"; do
     fi
 done
 
-if [ "$PATCH Applied" -eq 0 ]; then
+if [ "$PATCH_Applied" -eq 0 ]; then
     echo -e "  ${YELLOW}⚠ No XOR patches applied - using standard OpenVPN${NC}"
     XOR_SUPPORT=0
 else
