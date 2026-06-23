@@ -1,7 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+
+import { apiFetch, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { ErrorState } from '@/components/ui/error-state';
+import { LoadingState } from '@/components/ui/spinner';
 
 interface AuditLog {
   id: string;
@@ -13,41 +18,36 @@ interface AuditLog {
   createdAt: string;
 }
 
+const TH = 'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap';
+
 export default function AuditPage() {
   const router = useRouter();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchLogs = async () => {
-      const admin = localStorage.getItem('admin');
-      if (!admin) {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ logs: AuditLog[] }>('/api/audit-logs');
+      setLogs(data.logs || []);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
         router.push('/login');
         return;
       }
-
-      try {
-        const res = await fetch('/api/audit-logs');
-
-        if (!res.ok) {
-          if (res.status === 401) {
-            localStorage.removeItem('admin');
-            router.push('/login');
-            return;
-          }
-          throw new Error('Failed to fetch logs');
-        }
-
-        const data = await res.json();
-        setLogs(data.logs || []);
-        setLoading(false);
-      } catch (err) {
-        setLoading(false);
-      }
-    };
-
-    fetchLogs();
+      const message = err instanceof Error ? err.message : 'Failed to load audit logs';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Failed to load audit logs', description: message });
+    } finally {
+      setLoading(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div className="space-y-6">
@@ -57,7 +57,14 @@ export default function AuditPage() {
       </div>
 
       {loading ? (
-        <div className="text-center py-12">Loading...</div>
+        <LoadingState label="Loading audit logs" />
+      ) : error && logs.length === 0 ? (
+        <ErrorState
+          title="Couldn't load audit logs"
+          message={error}
+          onRetry={load}
+          retrying={loading}
+        />
       ) : logs.length === 0 ? (
         <div className="bg-card text-card-foreground border border-border rounded-lg p-12 text-center">
           <p className="text-muted-foreground">No activity yet</p>
@@ -66,26 +73,15 @@ export default function AuditPage() {
         <div className="bg-card text-card-foreground border border-border rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
+              <caption className="sr-only">Administrative activity log</caption>
               <thead className="bg-muted">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    Timestamp
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    Admin
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    Action
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    Node
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    Client
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">
-                    IP
-                  </th>
+                  <th scope="col" className={TH}>Timestamp</th>
+                  <th scope="col" className={TH}>Admin</th>
+                  <th scope="col" className={TH}>Action</th>
+                  <th scope="col" className={TH}>Node</th>
+                  <th scope="col" className={TH}>Client</th>
+                  <th scope="col" className={TH}>IP</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -94,18 +90,10 @@ export default function AuditPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                       {new Date(log.createdAt).toLocaleString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {log.adminEmail || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">
-                      {log.action}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {log.nodeName || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {log.clientName || '-'}
-                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">{log.adminEmail || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-mono">{log.action}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">{log.nodeName || '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">{log.clientName || '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                       {log.ipAddress || '-'}
                     </td>

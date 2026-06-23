@@ -1,6 +1,10 @@
 import { readFileSync } from 'fs';
 import dotenv from 'dotenv';
 
+// Single source of truth for the agent version. Used for the User-Agent header
+// and version logging across the codebase.
+export const VERSION = '3.1.0';
+
 // Load .env file if exists (for development)
 dotenv.config();
 

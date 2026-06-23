@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { jobQueue } from '@/lib/queue';
 import { withAuth } from '@/lib/middleware';
 
 type Params = Promise<{ id: string }>;
@@ -17,7 +16,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
           select: { id: true, name: true, host: true },
         },
         artifacts: {
-          where: { expiresAt: { gte: new Date() } },
+          where: { OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },

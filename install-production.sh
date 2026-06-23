@@ -430,15 +430,14 @@ create_admin_user() {
 
     # Generate password hash and create admin
     docker exec ovpn-admin-panel node -e "
-      const crypto = require('crypto');
+      const bcrypt = require('bcryptjs');
       const { PrismaClient } = require('@prisma/client');
       const prisma = new PrismaClient();
 
       async function createAdmin() {
-        // Generate password hash
-        const passwordHash = crypto.createHash('sha256')
-          .update('${ADMIN_PASSWORD}' + '${PASSWORD_SALT}')
-          .digest('hex');
+        // bcrypt — MUST match the login route's bcrypt.compare(). A SHA-256
+        // hash here would make the admin unable to log in.
+        const passwordHash = bcrypt.hashSync('${ADMIN_PASSWORD}', 12);
 
         // Check if admin exists
         const existing = await prisma.admin.findUnique({
@@ -467,20 +466,10 @@ create_admin_user() {
 
       createAdmin().catch(console.error);
     " || {
-        log_warn "Admin creation via panel failed, trying direct method..."
-
-        # Alternative: Direct database insertion
-        docker exec ovpn-admin-db psql -U ovpn -d ovpn_admin -c "
-          INSERT INTO \"Admin\" (id, email, passwordHash, role, createdAt)
-          VALUES (
-            (select gen_random_uuid()),
-            '${ADMIN_EMAIL}',
-            (encode digest('${ADMIN_PASSWORD}${PASSWORD_SALT}', 'sha256'), 'hex'),
-            'SUPERADMIN',
-            now()
-          )
-          ON CONFLICT (email) DO UPDATE SET passwordHash = EXCLUDED.passwordHash;
-        " && log_success "Admin created via database"
+        # No SQL fallback: Postgres cannot produce a bcrypt hash, and a SHA-256
+        # row would lock the admin out. Fail loudly with a recovery command.
+        log_error "Admin creation failed. Re-run after the panel is healthy:"
+        log_error "  docker exec ovpn-admin-panel sh -c 'SEED_ADMIN_EMAIL=${ADMIN_EMAIL} SEED_ADMIN_PASSWORD=${ADMIN_PASSWORD} node_modules/.bin/tsx prisma/seed.ts'"
     }
 
     log_success "Admin user created/updated"

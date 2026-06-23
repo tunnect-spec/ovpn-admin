@@ -1,9 +1,32 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Copy, Plus, Trash2, MoveRight } from 'lucide-react';
+
 import { InstallNodeDialog } from './InstallNodeDialog';
+import { apiFetch, ApiError, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { confirm } from '@/components/ui/confirm-dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ErrorState } from '@/components/ui/error-state';
+import { LoadingState } from '@/components/ui/spinner';
+import { getNodeStatus } from '@/components/status-config';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+
+interface NodeMetadata {
+  os?: string;
+  arch?: string;
+}
 
 interface NodeDetails {
   id: string;
@@ -12,237 +35,275 @@ interface NodeDetails {
   status: string;
   version: string | null;
   openvpnVersion: string | null;
-  metadata?: unknown;
+  metadata?: NodeMetadata | null;
   xorMask: string | null;
   lastHeartbeatAt: string | null;
   installedAt: string | null;
   createdAt: string;
   healthStatus: {
     status: string;
-    details: {
-      connectedClients?: number;
-      cpu?: number;
-      memory?: number;
-      uptime?: number;
-    };
+    details: { connectedClients?: number; cpu?: number; memory?: number; uptime?: number };
     checkedAt: string;
   } | null;
 }
 
-const statusColors: Record<string, string> = {
-  PENDING: 'bg-muted-foreground',
-  PROVISIONING: 'bg-blue-500',
-  HEALTHY: 'bg-emerald-500',
-  UNHEALTHY: 'bg-yellow-500',
-  ERROR: 'bg-destructive',
-};
-
-const statusBgColors: Record<string, string> = {
-  PENDING: 'bg-muted/20 text-muted-foreground',
-  PROVISIONING: 'bg-blue-500/20 text-blue-500',
-  HEALTHY: 'bg-emerald-500/20 text-emerald-500',
-  UNHEALTHY: 'bg-yellow-500/20 text-yellow-500',
-  ERROR: 'bg-destructive/20 text-destructive',
-};
-
-const statusLabels: Record<string, string> = {
-  PENDING: 'Pending Agent',
-  PROVISIONING: 'Installing',
-  HEALTHY: 'Healthy',
-  UNHEALTHY: 'Unhealthy',
-  ERROR: 'Error',
-};
-
 export default function NodeDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const nodeId = params.id as string;
+  const nodeId = typeof params.id === 'string' ? params.id : '';
 
   const [node, setNode] = useState<NodeDetails | null>(null);
   const [loading, setLoading] = useState(true);
-  const [installing, setInstalling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
   const [showMigrateDialog, setShowMigrateDialog] = useState(false);
   const [migrateToken, setMigrateToken] = useState('');
   const [installProgress, setInstallProgress] = useState(0);
   const [installMessage, setInstallMessage] = useState('');
+  const [origin, setOrigin] = useState('');
 
-  const fetchNode = async () => {
-    const admin = localStorage.getItem('admin');
-    if (!admin) {
-      router.push('/login');
-      return;
-    }
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
-    try {
-      const res = await fetch(`/api/nodes/${nodeId}`);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-      if (!res.ok) {
-        if (res.status === 401) {
-          localStorage.removeItem('admin');
+  const loadNode = useCallback(
+    async (signal?: AbortSignal, background = false): Promise<void> => {
+      if (!background) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const data = await apiFetch<{ node: NodeDetails }>(
+          `/api/nodes/${nodeId}`,
+          signal ? { signal } : undefined,
+        );
+        if (!mountedRef.current) return;
+        setNode(data.node);
+        setError(null);
+      } catch (err) {
+        if (signal?.aborted || !mountedRef.current) return;
+        if (err instanceof UnauthorizedError) {
           router.push('/login');
           return;
         }
-        if (res.status === 404) {
+        if (err instanceof ApiError && err.status === 404) {
           router.push('/dashboard/nodes');
           return;
         }
-        throw new Error('Failed to load node');
+        const message = err instanceof Error ? err.message : 'Failed to load node';
+        if (!background) {
+          setError(message);
+          toast({ variant: 'destructive', title: 'Failed to load node', description: message });
+        }
+      } finally {
+        if (!background && mountedRef.current) setLoading(false);
       }
+    },
+    [nodeId, router],
+  );
 
-      const data = await res.json();
-      setNode(data.node);
-      setLoading(false);
-    } catch (err) {
-      setLoading(false);
-    }
-  };
-
+  // Initial load + 10s background refresh (self-scheduling, never overlaps).
   useEffect(() => {
-    fetchNode();
-    // Refresh every 10 seconds
-    const interval = setInterval(fetchNode, 10000);
-    return () => clearInterval(interval);
-  }, [nodeId]);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
 
+    const schedule = () => {
+      if (cancelled) return;
+      timer = setTimeout(async () => {
+        await loadNode(controller.signal, true);
+        schedule();
+      }, 10000);
+    };
+
+    loadNode(controller.signal).then(schedule);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [loadNode]);
+
+  // Install-progress poll while PROVISIONING (2s, self-scheduling).
   useEffect(() => {
     if (node?.status !== 'PROVISIONING') return;
 
-    const fetchProgress = async () => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const poll = async () => {
       try {
-        const res = await fetch(`/api/nodes/${nodeId}/install-progress`);
-        if (res.ok) {
-          const data = await res.json();
-          setInstallProgress(data.progress);
-          setInstallMessage(data.message);
-          if (data.status !== 'PENDING') {
-            fetchNode();
-          }
+        const data = await apiFetch<{ progress?: number; message?: string; status?: string }>(
+          `/api/nodes/${nodeId}/install-progress`,
+          { signal: controller.signal },
+        );
+        if (cancelled) return;
+        setInstallProgress(data.progress ?? 0);
+        setInstallMessage(data.message ?? '');
+        if (data.status && data.status !== 'PENDING') {
+          loadNode(controller.signal, true);
         }
-      } catch (err) {}
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        // transient — keep polling
+      }
+      if (!cancelled) timer = setTimeout(poll, 2000);
     };
 
-    fetchProgress();
-    const interval = setInterval(fetchProgress, 2000);
-    return () => clearInterval(interval);
-  }, [node?.status, nodeId]);
-
-  const handleInstall = () => {
-    setShowInstallDialog(true);
-  };
+    poll();
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [node?.status, nodeId, loadNode]);
 
   const handleDelete = async () => {
-    if (!confirm(`Delete node "${node?.name}"?`)) return;
-
-    const res = await fetch(`/api/nodes/${nodeId}`, {
-      method: 'DELETE',
+    if (!node) return;
+    const ok = await confirm({
+      title: `Delete node "${node.name}"?`,
+      description: 'This removes the node from the panel. Nodes with active clients cannot be deleted.',
+      confirmLabel: 'Delete node',
+      destructive: true,
     });
+    if (!ok) return;
 
-    if (res.ok) {
+    try {
+      await apiFetch(`/api/nodes/${nodeId}`, { method: 'DELETE' });
+      toast({ variant: 'success', title: 'Node deleted' });
       router.push('/dashboard/nodes');
-    } else {
-      const data = await res.json();
-      alert(data.message || 'Failed to delete node');
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to delete node';
+      toast({ variant: 'destructive', title: 'Failed to delete node', description: message });
     }
   };
 
   const handleMigrate = async () => {
-    if (!confirm('This will disconnect the current server and prepare the panel for a new server. Are you sure?')) return;
+    const ok = await confirm({
+      title: 'Migrate this server?',
+      description:
+        'This invalidates the current agent and issues a fresh registration token so you can move this node (and its PKI) to a new server. Existing clients keep working after migration.',
+      confirmLabel: 'Generate migration command',
+      destructive: true,
+    });
+    if (!ok) return;
+
     try {
-      const res = await fetch(`/api/nodes/${nodeId}/migrate-token`, { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        setMigrateToken(data.token);
-        setShowMigrateDialog(true);
-        fetchNode();
-      } else {
-        alert(data.message || 'Failed to generate migrate token');
+      const data = await apiFetch<{ token: string }>(`/api/nodes/${nodeId}/migrate-token`, { method: 'POST' });
+      setMigrateToken(data.token);
+      setShowMigrateDialog(true);
+      loadNode();
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
       }
-    } catch (e) {
-      alert('Error generating token');
+      const message = err instanceof Error ? err.message : 'Failed to generate migration token';
+      toast({ variant: 'destructive', title: 'Migration failed', description: message });
     }
   };
 
-  if (loading) {
-    return <div className="text-center py-12">Loading...</div>;
+  const migrateCommand = `curl -fsSL ${origin}/api/agent/install.sh | AGENT_TOKEN=${migrateToken} PANEL_URL=${origin} bash`;
+
+  const copyMigrate = async () => {
+    await navigator.clipboard.writeText(migrateCommand);
+    toast({ variant: 'success', title: 'Command copied' });
+  };
+
+  if (loading && !node) {
+    return <LoadingState label="Loading node" />;
+  }
+
+  if (error && !node) {
+    return <ErrorState title="Couldn't load node" message={error} onRetry={() => loadNode()} retrying={loading} />;
   }
 
   if (!node) {
-    return <div className="text-center py-12 text-destructive">Node not found</div>;
+    return <ErrorState title="Node not found" message="This node no longer exists." onRetry={() => router.push('/dashboard/nodes')} />;
   }
 
+  const status = getNodeStatus(node.status);
+  const StatusIcon = status.icon;
   const canInstall = node.status === 'PENDING' || node.status === 'PROVISIONING';
   const canAddClient = node.status === 'HEALTHY';
 
   return (
     <div className="space-y-6">
-      {showInstallDialog && node && (
+      {showInstallDialog && (
         <InstallNodeDialog
           nodeId={node.id}
           defaultHost={node.host}
           onClose={() => setShowInstallDialog(false)}
           onSuccess={() => {
             setShowInstallDialog(false);
-            fetchNode();
+            loadNode();
           }}
         />
       )}
 
-      {showMigrateDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card text-card-foreground p-6 rounded-lg shadow-lg max-w-xl w-full border border-border">
-            <h3 className="text-xl font-bold mb-4">Migrate Server</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Run the following command on your <strong>new</strong> empty Ubuntu server. This will install the agent, link it to this Node, and restore all PKI keys so existing clients continue to work.
-            </p>
-            <div className="bg-black/50 p-3 rounded-md mb-6 relative group overflow-hidden">
-              <code className="text-xs text-green-400 break-all select-all block">
-                curl -fsSL {window.location.origin}/api/agent/install.sh | AGENT_TOKEN={migrateToken} PANEL_URL={window.location.origin} bash
-              </code>
-            </div>
-            <div className="flex justify-end gap-3 mt-4">
-              <button
-                type="button"
-                onClick={() => setShowMigrateDialog(false)}
-                className="px-4 py-2 border border-border rounded-md hover:bg-secondary/50"
-              >
-                Close
-              </button>
-            </div>
+      <Dialog open={showMigrateDialog} onOpenChange={setShowMigrateDialog}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Migrate Server</DialogTitle>
+            <DialogDescription>
+              Run this on your <strong>new</strong> empty Ubuntu server. It installs the agent, links it to this node,
+              and restores all PKI keys so existing clients keep working.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative rounded-md bg-black/50 p-3">
+            <code className="block break-all pr-10 text-xs text-emerald-400 select-all">{migrateCommand}</code>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Copy migration command"
+              className="absolute right-1.5 top-1.5 h-7 w-7"
+              onClick={copyMigrate}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMigrateDialog(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <div className="flex justify-between items-start">
+      <div className="flex flex-wrap justify-between items-start gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold">{node.name}</h2>
-            <span className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-              statusBgColors[node.status] || statusBgColors.PENDING
-            }`}>
-              <span className={`w-2 h-2 rounded-full ${statusColors[node.status]}`} />
-              {statusLabels[node.status] || node.status}
-            </span>
+            <Badge variant={status.variant} className="gap-1">
+              <StatusIcon className="h-3 w-3" aria-hidden="true" />
+              {status.label}
+            </Badge>
           </div>
           <p className="text-muted-foreground mt-1">{node.host}</p>
         </div>
         <div className="flex gap-2">
           {canInstall && (
-            <button
-              onClick={handleInstall}
-              disabled={installing}
-              className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-md font-medium"
-            >
-              {installing ? 'Installing...' : 'Install OpenVPN'}
-            </button>
+            <Button onClick={() => setShowInstallDialog(true)}>Install OpenVPN</Button>
           )}
           {canAddClient && (
-            <Link
-              href={`/dashboard/nodes/${nodeId}/clients/new`}
-              className="px-4 py-2 bg-emerald-500 text-white hover:bg-emerald-600 rounded-md font-medium"
-            >
-              + Add Client
-            </Link>
+            <Button asChild className="gap-2">
+              <Link href={`/dashboard/nodes/${nodeId}/clients/new`}>
+                <Plus className="h-4 w-4" />
+                Add Client
+              </Link>
+            </Button>
           )}
         </div>
       </div>
@@ -253,12 +314,15 @@ export default function NodeDetailsPage() {
             <h3 className="font-semibold text-lg">Installing OpenVPN</h3>
             <span className="text-sm font-medium">{installProgress}%</span>
           </div>
-          <p className="text-sm text-muted-foreground mb-4">{installMessage || 'Please wait...'}</p>
-          <div className="w-full bg-secondary rounded-full h-3 overflow-hidden">
-            <div 
-              className="bg-primary h-3 rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${installProgress}%` }}
-            ></div>
+          <p className="text-sm text-muted-foreground mb-4">{installMessage || 'Please wait…'}</p>
+          <div
+            className="w-full bg-secondary rounded-full h-3 overflow-hidden"
+            role="progressbar"
+            aria-valuenow={installProgress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div className="bg-primary h-3 rounded-full transition-all duration-500 ease-out" style={{ width: `${installProgress}%` }} />
           </div>
         </div>
       )}
@@ -267,40 +331,19 @@ export default function NodeDetailsPage() {
         <DetailCard label="Host / IP" value={node.host} />
         <DetailCard label="Agent Version" value={node.version || '-'} />
         <DetailCard label="OpenVPN" value={node.openvpnVersion || '-'} />
-        <DetailCard 
-          label="System" 
-          value={node.metadata ? `${(node.metadata as any).os || 'Unknown OS'} (${(node.metadata as any).arch || 'Unknown Arch'})` : '-'} 
-        />
-        <DetailCard
-          label="Last Heartbeat"
-          value={node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleString() : 'Never'}
-        />
-        <DetailCard
-          label="Created"
-          value={new Date(node.createdAt).toLocaleString()}
-        />
+        <DetailCard label="System" value={node.metadata ? `${node.metadata.os || 'Unknown OS'} (${node.metadata.arch || 'Unknown Arch'})` : '-'} />
+        <DetailCard label="Last Heartbeat" value={node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).toLocaleString() : 'Never'} />
+        <DetailCard label="Created" value={new Date(node.createdAt).toLocaleString()} />
       </div>
 
       {node.healthStatus && node.status === 'HEALTHY' && (
         <div className="bg-card text-card-foreground border border-border rounded-lg p-6">
           <h3 className="text-lg font-semibold mb-4">Health Status</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <MetricCard
-              label="Connected Clients"
-              value={node.healthStatus.details.connectedClients ?? 0}
-            />
-            <MetricCard
-              label="CPU"
-              value={node.healthStatus.details.cpu ? `${node.healthStatus.details.cpu.toFixed(1)}%` : '-'}
-            />
-            <MetricCard
-              label="Memory"
-              value={node.healthStatus.details.memory ? `${node.healthStatus.details.memory.toFixed(1)}%` : '-'}
-            />
-            <MetricCard
-              label="Uptime"
-              value={node.healthStatus.details.uptime ? `${Math.floor(node.healthStatus.details.uptime / 3600)}h` : '-'}
-            />
+            <MetricCard label="Connected Clients" value={node.healthStatus.details.connectedClients ?? 0} />
+            <MetricCard label="CPU" value={node.healthStatus.details.cpu != null ? `${node.healthStatus.details.cpu.toFixed(1)}%` : '-'} />
+            <MetricCard label="Memory" value={node.healthStatus.details.memory != null ? `${node.healthStatus.details.memory.toFixed(1)}%` : '-'} />
+            <MetricCard label="Uptime" value={node.healthStatus.details.uptime ? `${Math.floor(node.healthStatus.details.uptime / 3600)}h` : '-'} />
           </div>
           {node.xorMask && (
             <div className="mt-4 pt-4 border-t border-border">
@@ -313,32 +356,26 @@ export default function NodeDetailsPage() {
 
       <div className="bg-card text-card-foreground border border-border rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-4">Actions</h3>
-        <div className="flex flex-wrap gap-4">
-          <Link
-            href={`/dashboard/nodes/${nodeId}/clients`}
-            className="px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border rounded-md"
-          >
-            View Clients
-          </Link>
-          <Link
-            href={`/dashboard/jobs?nodeId=${nodeId}`}
-            className="px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border rounded-md"
-          >
-            View Jobs
-          </Link>
-          <button
-            onClick={handleDelete}
-            className="px-4 py-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md font-medium"
-          >
+        <div className="flex flex-wrap gap-3">
+          <Button asChild variant="secondary">
+            <Link href={`/dashboard/nodes/${nodeId}/clients`}>View Clients</Link>
+          </Button>
+          <Button asChild variant="secondary">
+            <Link href={`/dashboard/jobs?nodeId=${nodeId}`}>View Jobs</Link>
+          </Button>
+          <Button variant="destructive" onClick={handleDelete} className="gap-2">
+            <Trash2 className="h-4 w-4" />
             Delete Node
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
             onClick={handleMigrate}
-            className="px-4 py-2 bg-yellow-600 text-white hover:bg-yellow-700 rounded-md font-medium ml-auto"
-            title="Move this Node and its clients to a new physical server"
+            className="gap-2 ml-auto border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+            title="Move this node and its clients to a new physical server"
           >
+            <MoveRight className="h-4 w-4" />
             Migrate Server
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -349,7 +386,7 @@ function DetailCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-muted text-muted-foreground border border-border rounded-lg p-4">
       <div className="text-sm text-muted-foreground">{label}</div>
-      <div className="mt-1 font-medium">{value}</div>
+      <div className="mt-1 font-medium text-foreground break-words">{value}</div>
     </div>
   );
 }

@@ -3,23 +3,22 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+import { Spinner } from '@/components/ui/spinner';
+
 export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    const admin = localStorage.getItem('admin');
-    if (admin) {
-      router.push('/dashboard');
-    } else {
-      router.push('/login');
-    }
+    // The dashboard layout enforces auth server-side; unauthenticated users are
+    // redirected to /login from there. Here we just forward to the dashboard.
+    router.push('/dashboard');
   }, [router]);
 
   return (
     <main className="flex min-h-screen items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-        <p className="text-muted-foreground">Loading...</p>
+      <div className="flex flex-col items-center gap-4 text-center">
+        <Spinner className="h-8 w-8 text-primary" label="Loading" />
+        <p className="text-muted-foreground">Loading…</p>
       </div>
     </main>
   );

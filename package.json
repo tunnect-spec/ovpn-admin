@@ -8,6 +8,8 @@
     "build:panel": "pnpm --filter @ovpn/panel build",
     "build:worker": "pnpm --filter @ovpn/worker build",
     "build:agent": "pnpm --filter @ovpn/agent build",
+    "test": "pnpm --filter @ovpn/panel test",
+    "lint": "pnpm --filter @ovpn/panel lint",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",

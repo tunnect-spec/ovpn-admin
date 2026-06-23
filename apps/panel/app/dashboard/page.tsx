@@ -1,11 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Server, Users, Briefcase, ArrowRight, Activity, TrendingUp, Shield } from 'lucide-react';
 import Link from 'next/link';
+
+import { apiFetch, UnauthorizedError } from '@/components/use-api';
+import { LoadingState } from '@/components/ui/spinner';
+import { ErrorState } from '@/components/ui/error-state';
+import { toast } from '@/components/ui/use-toast';
 
 interface Stats {
   nodes: { total: number; healthy: number; unhealthy: number; pending: number; error: number };
@@ -14,45 +20,47 @@ interface Stats {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      const admin = localStorage.getItem('admin');
-      if (!admin) {
-        window.location.href = '/login';
+  const fetchStats = useCallback(async () => {
+    setError(false);
+    try {
+      const data = await apiFetch<Stats>('/api/dashboard/stats');
+      setStats(data);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
         return;
       }
+      setError(true);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to load stats',
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
 
-      try {
-        const res = await fetch('/api/dashboard/stats');
-
-        if (!res.ok) {
-          if (res.status === 401) {
-            localStorage.removeItem('admin');
-            window.location.href = '/login';
-            return;
-          }
-          throw new Error('Failed to fetch stats');
-        }
-
-        const data = await res.json();
-        setStats(data);
-        setLoading(false);
-      } catch (err) {
-        setLoading(false);
-      }
-    };
-
+  useEffect(() => {
     fetchStats();
-  }, []);
+  }, [fetchStats]);
 
   if (loading) {
+    return <LoadingState label="Loading dashboard" />;
+  }
+
+  if (error && !stats) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="loading-spinner" />
-      </div>
+      <ErrorState
+        message="We could not load the dashboard stats."
+        onRetry={fetchStats}
+        retrying={loading}
+      />
     );
   }
 
@@ -148,12 +156,12 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="mt-4">
-              <Link href="/dashboard/nodes">
-                <Button variant="ghost" size="sm" className="w-full justify-between">
+              <Button asChild variant="ghost" size="sm" className="w-full justify-between">
+                <Link href="/dashboard/nodes">
                   Manage Clients
                   <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -203,8 +211,8 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-3">
-            <Link href="/dashboard/nodes/new">
-              <Button className="w-full h-auto py-4 group relative overflow-hidden" size="lg">
+            <Button asChild className="w-full h-auto py-4 group relative overflow-hidden" size="lg">
+              <Link href="/dashboard/nodes/new">
                 <div className="relative flex items-center gap-3">
                   <Plus className="h-5 w-5" />
                   <div className="text-left">
@@ -212,11 +220,11 @@ export default function DashboardPage() {
                     <div className="text-xs text-primary-foreground/70">Register a new VPN node</div>
                   </div>
                 </div>
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
-            <Link href="/dashboard/nodes">
-              <Button variant="outline" className="w-full h-auto py-4 group" size="lg">
+            <Button asChild variant="outline" className="w-full h-auto py-4 group" size="lg">
+              <Link href="/dashboard/nodes">
                 <div className="flex items-center gap-3">
                   <Server className="h-5 w-5" />
                   <div className="text-left">
@@ -224,11 +232,11 @@ export default function DashboardPage() {
                     <div className="text-xs text-muted-foreground">Manage all nodes</div>
                   </div>
                 </div>
-              </Button>
-            </Link>
+              </Link>
+            </Button>
 
-            <Link href="/dashboard/jobs">
-              <Button variant="outline" className="w-full h-auto py-4 group" size="lg">
+            <Button asChild variant="outline" className="w-full h-auto py-4 group" size="lg">
+              <Link href="/dashboard/jobs">
                 <div className="flex items-center gap-3">
                   <Activity className="h-5 w-5" />
                   <div className="text-left">
@@ -236,8 +244,8 @@ export default function DashboardPage() {
                     <div className="text-xs text-muted-foreground">Check job status</div>
                   </div>
                 </div>
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>

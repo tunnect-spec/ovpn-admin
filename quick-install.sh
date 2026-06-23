@@ -243,16 +243,17 @@ npx prisma db push --skip-generate
 # Create admin user with provided credentials
 cat > prisma/seed.ts << SEED_EOF
 import { PrismaClient } from '@prisma/client';
-import * as crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('Seeding database...');
 
-  const salt = '${PASSWORD_SALT}';
   const password = '${ADMIN_PASSWORD}';
-  const hash = crypto.createHash('sha256').update(password + salt).digest('hex');
+  // MUST be bcrypt — the login route verifies with bcrypt.compare(). A SHA-256
+  // hash here would lock the admin out entirely.
+  const hash = await bcrypt.hash(password, 12);
 
   const admin = await prisma.admin.upsert({
     where: { email: '${ADMIN_EMAIL}' },

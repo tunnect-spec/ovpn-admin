@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { jobQueue } from '@/lib/queue';
 import { withAuth } from '@/lib/middleware';
 
 type Params = Promise<{ id: string }>;
 
 // GET /api/jobs/:id - Get job details
-export const GET = withAuth(async (request: NextRequest, { params }: { params: Params }) => {
+export const GET = withAuth(async (request: NextRequest, payload, { params }: { params: Params }) => {
   try {
     const { id } = await params;
 
@@ -53,7 +52,7 @@ export const GET = withAuth(async (request: NextRequest, { params }: { params: P
 });
 
 // DELETE /api/jobs/:id - Cancel job
-export const DELETE = withAuth(async (request: NextRequest, { params }: { params: Params }) => {
+export const DELETE = withAuth(async (request: NextRequest, payload, { params }: { params: Params }) => {
   try {
     const { id } = await params;
 
@@ -75,10 +74,8 @@ export const DELETE = withAuth(async (request: NextRequest, { params }: { params
       );
     }
 
-    // Cancel in BullMQ
-    await jobQueue.remove(id);
-
-    // Update status
+    // Cancelling = marking the DB job CANCELLED. The agent only ever picks up
+    // PENDING jobs via heartbeat, so a cancelled job is simply never delivered.
     await prisma.job.update({
       where: { id },
       data: {

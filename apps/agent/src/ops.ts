@@ -1,15 +1,28 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { readFileSync, unlinkSync } from 'fs';
-import { exec as execSync } from 'child_process';
+import { existsSync } from 'fs';
 import path from 'path';
 
 const exec = promisify(execFile);
 
+// Client names are interpolated into root-run shell scripts (add-user.sh /
+// revoke-user.sh) and into filesystem paths. Validate every name at every entry
+// point — not just on create — to prevent argument/path injection.
+const CLIENT_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+function assertValidClientName(name: string): void {
+  if (!name || !CLIENT_NAME_RE.test(name) || name.length > 64) {
+    throw new Error(`Invalid client name: ${name}`);
+  }
+}
+
 // Paths from the install script
 const OVPN_DIR = '/etc/openvpn/xor';
 const ADMIN_DIR = '/root/ovpn-xor-admin';
-const OVPN_BIN = '/usr/local/sbin/openvpn';
+// The XOR installer symlinks the patched binary as `openvpn-xor`. Prefer that,
+// falling back to a plain `openvpn` for other layouts.
+const OVPN_BIN = existsSync('/usr/local/sbin/openvpn-xor')
+  ? '/usr/local/sbin/openvpn-xor'
+  : '/usr/local/sbin/openvpn';
 
 export interface OpenVpnStatus {
   openvpn: 'RUNNING' | 'STOPPED' | 'ERROR';
@@ -59,8 +72,9 @@ export class OpenVpnOps {
         };
       }
 
-      // Get OpenVPN version
-      let version: string = '2.7.3';
+      // Get OpenVPN version. Report 'unknown' rather than a fabricated default
+      // when the real version can't be read.
+      let version = 'unknown';
       try {
         const { stdout: versionOutput } = await exec(OVPN_BIN, ['--version']);
         const versionMatch = versionOutput.match(/OpenVPN (\d+\.\d+\.\d+)/);
@@ -68,7 +82,7 @@ export class OpenVpnOps {
           version = versionMatch[1];
         }
       } catch (e) {
-        // Keep default version
+        // Real version unavailable; leave as 'unknown'.
       }
 
       // Get XOR mask from config
@@ -121,28 +135,37 @@ export class OpenVpnOps {
    */
   async getDetails(): Promise<OpenVpnDetails> {
     try {
-      // Get system stats
-      const { stdout: vmstat } = await exec('vmstat', ['1', '2']);
-      const lines = vmstat.split('\n');
-      const cpuLine = lines[lines.length - 1].trim().split(/\s+/);
-      const cpuIdle = parseInt(cpuLine[15] || '0', 10);
-      const cpu = 100 - cpuIdle;
+      // CPU from two /proc/stat samples (reliable across kernels/locales, unlike
+      // a fixed vmstat column index which mis-parsed to ~100% on some hosts).
+      const cpu = await this.getCpuUsage();
 
-      // Memory from /proc/meminfo
+      // Memory from /proc/meminfo. Guard against memTotal === 0 so we never
+      // divide by zero and emit NaN to the panel.
       const { stdout: meminfo } = await exec('cat', ['/proc/meminfo']);
       const memTotal = parseInt(meminfo.match(/MemTotal:\s+(\d+)/)?.[1] || '0', 10);
       const memAvailable = parseInt(meminfo.match(/MemAvailable:\s+(\d+)/)?.[1] || '0', 10);
-      const memory = ((memTotal - memAvailable) / memTotal) * 100;
+      const memory = memTotal > 0 ? ((memTotal - memAvailable) / memTotal) * 100 : 0;
 
-      // Disk usage
-      const { stdout: df } = await exec('df', ['/']);
-      const dfLines = df.split('\n');
-      const dfLine = dfLines[dfLines.length - 1].split(/\s+/);
-      const disk = parseInt(dfLine[dfLine.length - 2] || '0', 10);
+      // Disk usage. Use `df --output=pcent /` which prints a header line and a
+      // single trailing percentage (e.g. "42%"), then strip the '%'. This is
+      // robust against column-count differences; fall back to 0 if unparseable.
+      let disk = 0;
+      try {
+        const { stdout: dfOut } = await exec('df', ['--output=pcent', '/']);
+        const pctMatch = dfOut.match(/(\d+)\s*%/);
+        if (pctMatch?.[1]) {
+          const parsed = parseInt(pctMatch[1], 10);
+          if (!Number.isNaN(parsed)) {
+            disk = parsed;
+          }
+        }
+      } catch {
+        // df unavailable or unexpected output; leave disk at 0.
+      }
 
       return {
-        cpu,
-        memory,
+        cpu: Number.isNaN(cpu) ? 0 : cpu,
+        memory: Number.isNaN(memory) ? 0 : memory,
         disk,
         connectedClients: await this.getConnectedClientCount(),
       };
@@ -153,43 +176,55 @@ export class OpenVpnOps {
   }
 
   /**
+   * CPU usage percentage from two /proc/stat snapshots. Computes the non-idle
+   * fraction of the jiffy delta over a short window — robust to kernel/column
+   * differences (the previous vmstat-index approach reported ~100% on 1-core
+   * hosts).
+   */
+  private async getCpuUsage(): Promise<number> {
+    const sample = async (): Promise<{ idle: number; total: number }> => {
+      const { stdout } = await exec('cat', ['/proc/stat']);
+      const cpuLine = stdout.split('\n').find((l) => l.startsWith('cpu '));
+      const parts = (cpuLine || '').trim().split(/\s+/).slice(1).map((n) => parseInt(n, 10) || 0);
+      const idle = (parts[3] || 0) + (parts[4] || 0); // idle + iowait
+      const total = parts.reduce((a, b) => a + b, 0);
+      return { idle, total };
+    };
+    const a = await sample();
+    await new Promise((r) => setTimeout(r, 250));
+    const b = await sample();
+    const dTotal = b.total - a.total;
+    const dIdle = b.idle - a.idle;
+    if (dTotal <= 0) return 0;
+    return Math.max(0, Math.min(100, Math.round(((dTotal - dIdle) / dTotal) * 100)));
+  }
+
+  /**
    * Create a new VPN client
    */
   async createClient(name: string): Promise<CreateClientResult> {
-    // Validate client name
-    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
-      throw new Error(`Invalid client name: ${name}`);
-    }
+    assertValidClientName(name);
 
-    // Run the add-user script
+    const certPath = path.join(OVPN_DIR, 'easy-rsa', 'pki', 'issued', `${name}.crt`);
+    const ovpnPath = path.join(ADMIN_DIR, 'clients', `${name}.ovpn`);
+
     try {
-      const { stdout, stderr } = await exec(
+      // Idempotency: if the client already exists on disk (issued cert OR the
+      // generated .ovpn), do NOT re-run add-user.sh. Duplicate job delivery is
+      // then safe — we simply read back and return the existing artifacts.
+      if (existsSync(certPath) || existsSync(ovpnPath)) {
+        console.log(`  ↺ Client "${name}" already exists - returning existing config (idempotent)`);
+        return await this.buildClientResult(name, ovpnPath, certPath);
+      }
+
+      // Run the add-user script to create the client.
+      await exec(
         path.join(ADMIN_DIR, 'add-user.sh'),
         [name],
         { timeout: 60000 }
       );
 
-      // Read the generated .ovpn file
-      const ovpnPath = path.join(ADMIN_DIR, 'clients', `${name}.ovpn`);
-      const { stdout: ovpnContent } = await exec('cat', [ovpnPath]);
-
-      // Get fingerprint from certificate
-      const certPath = path.join(OVPN_DIR, 'easy-rsa', 'pki', 'issued', `${name}.crt`);
-      const { stdout: certInfo } = await exec(
-        'openssl',
-        ['x509', '-in', certPath, '-noout', '-fingerprint', '-sha256']
-      );
-      const fingerprint = certInfo.split('=')[1]?.trim() || '';
-
-      return {
-        success: true,
-        client: {
-          name,
-          fingerprint,
-          ovpnContent: Buffer.from(ovpnContent).toString('base64'),
-          createdAt: new Date().toISOString(),
-        },
-      };
+      return await this.buildClientResult(name, ovpnPath, certPath);
     } catch (error: any) {
       console.error('Failed to create client:', error);
       throw new Error(`Client creation failed: ${error.message}`);
@@ -197,9 +232,41 @@ export class OpenVpnOps {
   }
 
   /**
+   * Read the generated .ovpn config and certificate fingerprint for an existing
+   * client and assemble the success result. Shared by the create path and the
+   * idempotent already-exists path so both return the identical shape.
+   */
+  private async buildClientResult(
+    name: string,
+    ovpnPath: string,
+    certPath: string
+  ): Promise<CreateClientResult> {
+    // Read the generated .ovpn file
+    const { stdout: ovpnContent } = await exec('cat', [ovpnPath]);
+
+    // Get fingerprint from certificate
+    const { stdout: certInfo } = await exec(
+      'openssl',
+      ['x509', '-in', certPath, '-noout', '-fingerprint', '-sha256']
+    );
+    const fingerprint = certInfo.split('=')[1]?.trim() || '';
+
+    return {
+      success: true,
+      client: {
+        name,
+        fingerprint,
+        ovpnContent: Buffer.from(ovpnContent).toString('base64'),
+        createdAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  /**
    * Revoke a VPN client
    */
   async revokeClient(name: string): Promise<{ success: true }> {
+    assertValidClientName(name);
     try {
       // Run revoke script
       await exec(
@@ -244,7 +311,10 @@ export class OpenVpnOps {
       for (const line of lines) {
         const match = line.match(/✓\s+(.+)$/);
         if (match) {
-          const name = match[1];
+          const name = match[1].trim();
+          // Skip anything that isn't a well-formed client name before using it
+          // to build a filesystem path.
+          if (!CLIENT_NAME_RE.test(name)) continue;
 
           // Get fingerprint
           try {
@@ -281,6 +351,7 @@ export class OpenVpnOps {
    * Get client config file
    */
   async getClientConfig(name: string): Promise<{ success: true; ovpnContent: string }> {
+    assertValidClientName(name);
     const ovpnPath = path.join(ADMIN_DIR, 'clients', `${name}.ovpn`);
     const { stdout } = await exec('cat', [ovpnPath]);
 

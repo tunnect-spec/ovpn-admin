@@ -1,11 +1,23 @@
+import dns from 'dns';
 import { Agent } from './agent';
-import { config } from './config';
+import { config, VERSION } from './config';
+
+// Many VPS hosts are dual-stack but have broken/unrouted IPv6 egress. Node's
+// default DNS ordering can hand back an AAAA (IPv6) address first, and without
+// Happy Eyeballs the connection fails outright ("network error") even though
+// IPv4 works fine. Prefer IPv4 and enable Happy Eyeballs so the agent connects
+// to the panel regardless of the host's IPv6 state.
+dns.setDefaultResultOrder('ipv4first');
+const netModule = require('net');
+if (typeof netModule.setDefaultAutoSelectFamily === 'function') {
+  netModule.setDefaultAutoSelectFamily(true);
+}
 
 async function main() {
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║                                                              ║');
-  console.log('║              OpenVPN XOR Agent v3.1.0                        ║');
+  console.log(`║              OpenVPN XOR Agent v${VERSION}                        ║`);
   console.log('║                                                              ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');

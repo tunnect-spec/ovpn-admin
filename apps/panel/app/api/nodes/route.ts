@@ -4,6 +4,7 @@ import { createNodeSchema } from '@ovpn/api';
 import { createRegistrationToken, hashApiToken } from '@/lib/crypto';
 import { generateInstallCommand } from '@/lib/install';
 import { withAuth } from '@/lib/middleware';
+import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 import type { NodeStatus } from '@ovpn/types';
 
 // GET /api/nodes - List all nodes
@@ -132,12 +133,7 @@ async function POST_handler(request: NextRequest, payload: any) {
       registrationToken,
     }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Create node error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Failed to create node' },

@@ -1,26 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { authenticateAgent, agentUnauthorized } from '@/lib/api-helpers';
 
 // POST /api/agent/sync - Sync clients state
 export async function POST(request: NextRequest) {
   try {
-    // Verify token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'INVALID_TOKEN', message: 'Missing or invalid token' },
-        { status: 401 },
-      );
-    }
-
-    const token = authHeader.slice(7);
-    const nodeId = await verifyApiToken(token);
-    if (!nodeId) {
-      return NextResponse.json(
-        { error: 'INVALID_TOKEN', message: 'Token verification failed' },
-        { status: 401 },
-      );
-    }
+    const nodeId = await authenticateAgent(request);
+    if (!nodeId) return agentUnauthorized();
 
     // Parse body if present, otherwise empty object
     let body = {};
@@ -58,15 +44,4 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
-}
-
-async function verifyApiToken(token: string): Promise<string | null> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(token + (process.env.API_TOKEN_SALT || 'default_api_salt'));
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  const node = await prisma.node.findFirst({ where: { apiToken: hashHex } });
-  return node?.id ?? null;
 }

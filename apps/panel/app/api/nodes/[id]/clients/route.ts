@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createClientSchema } from '@ovpn/api';
-import { jobQueue } from '@/lib/queue';
 import { generateFingerprint } from '@/lib/crypto';
 import { withAuth } from '@/lib/middleware';
+import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 import type { ClientStatus } from '@ovpn/types';
 
 type Params = Promise<{ id: string }>;
@@ -152,12 +152,7 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       },
     }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Create client error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Failed to create client' },

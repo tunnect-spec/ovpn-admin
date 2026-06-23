@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@ovpn/db';
-import { hashApiToken } from '@/lib/crypto';
+import { hashApiToken, encrypt, decrypt } from '@/lib/crypto';
 
 async function authenticate(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -30,9 +30,12 @@ export async function POST(request: Request) {
       return new NextResponse('Empty backup', { status: 400 });
     }
 
+    // The PKI backup contains the CA private key — encrypt it at rest. We
+    // store the encrypted "ivhex:cthex" string as UTF-8 bytes in the column.
+    const enc = await encrypt(buffer.toString('base64'));
     await prisma.node.update({
       where: { id: node.id },
-      data: { pkiBackup: buffer },
+      data: { pkiBackup: Buffer.from(enc, 'utf-8') },
     });
 
     return NextResponse.json({ success: true });
@@ -53,7 +56,13 @@ export async function GET(request: Request) {
       return new NextResponse('No backup found', { status: 404 });
     }
 
-    return new NextResponse(node.pkiBackup, {
+    // Decrypt at-rest backups; fall back to raw bytes for legacy plaintext rows.
+    const raw = Buffer.from(node.pkiBackup);
+    const s = raw.toString('utf-8');
+    const dec = await decrypt(s);
+    const out = dec !== null ? Buffer.from(dec, 'base64') : raw;
+
+    return new NextResponse(out, {
       status: 200,
       headers: {
         'Content-Type': 'application/octet-stream',

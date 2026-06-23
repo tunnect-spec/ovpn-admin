@@ -2,6 +2,21 @@
 
 import { useState } from 'react';
 
+import { apiFetch, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+
 interface InstallNodeDialogProps {
   nodeId: string;
   defaultHost: string;
@@ -13,7 +28,6 @@ export function InstallNodeDialog({ nodeId, defaultHost, onClose, onSuccess }: I
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Form State
   const [useXor, setUseXor] = useState(true);
   const [domain, setDomain] = useState('');
   const [dnsMode, setDnsMode] = useState<'standard' | 'empty' | 'custom'>('standard');
@@ -27,7 +41,7 @@ export function InstallNodeDialog({ nodeId, defaultHost, onClose, onSuccess }: I
     setError(null);
 
     try {
-      const res = await fetch(`/api/nodes/${nodeId}/install`, {
+      await apiFetch(`/api/nodes/${nodeId}/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -40,152 +54,118 @@ export function InstallNodeDialog({ nodeId, defaultHost, onClose, onSuccess }: I
           mssfix,
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || data.error || 'Failed to start installation');
-      }
-
+      toast({ variant: 'success', title: 'Installation started', description: 'Track progress on the node page.' });
       onSuccess();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        setError('Your session expired. Please sign in again.');
+        setLoading(false);
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to start installation';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Installation failed to start', description: message });
       setLoading(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-card w-full max-w-lg rounded-xl border border-border shadow-2xl flex flex-col max-h-[90vh]">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-2xl font-bold">Install OpenVPN</h2>
-          <p className="text-muted-foreground mt-1">Configure your server setup</p>
-        </div>
+    <Dialog open onOpenChange={(open) => { if (!open && !loading) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Install OpenVPN</DialogTitle>
+          <DialogDescription>Configure your server setup</DialogDescription>
+        </DialogHeader>
 
-        <div className="p-6 overflow-y-auto">
-          {error && (
-            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-lg text-red-500 text-sm">
-              {error}
+        {error && (
+          <div className="p-4 bg-destructive/10 border border-destructive/40 rounded-lg text-destructive text-sm">
+            {error}
+          </div>
+        )}
+
+        <form id="install-form" onSubmit={handleSubmit} className="space-y-6">
+          {/* Connection Type */}
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Connection Type</legend>
+            <div className="flex gap-4">
+              <label className="flex-1 flex items-center gap-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-secondary/50">
+                <input type="radio" name="conn-type" checked={useXor} onChange={() => setUseXor(true)} className="w-4 h-4 accent-primary" />
+                <div>
+                  <div className="font-medium">OpenVPN + XOR</div>
+                  <div className="text-xs text-muted-foreground">Obfuscated connection</div>
+                </div>
+              </label>
+              <label className="flex-1 flex items-center gap-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-secondary/50">
+                <input type="radio" name="conn-type" checked={!useXor} onChange={() => setUseXor(false)} className="w-4 h-4 accent-primary" />
+                <div>
+                  <div className="font-medium">Standard</div>
+                  <div className="text-xs text-muted-foreground">No obfuscation</div>
+                </div>
+              </label>
             </div>
-          )}
+          </fieldset>
 
-          <form id="install-form" onSubmit={handleSubmit} className="space-y-6">
-            
-            {/* Connection Type */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Connection Type</label>
-              <div className="flex gap-4">
-                <label className="flex-1 flex items-center gap-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-secondary/50">
-                  <input 
-                    type="radio" 
-                    checked={useXor} 
-                    onChange={() => setUseXor(true)} 
-                    className="w-4 h-4 text-primary"
-                  />
-                  <div>
-                    <div className="font-medium">OpenVPN + XOR</div>
-                    <div className="text-xs text-muted-foreground">Obfuscated connection</div>
-                  </div>
-                </label>
-                <label className="flex-1 flex items-center gap-3 p-4 border border-border rounded-lg cursor-pointer hover:bg-secondary/50">
-                  <input 
-                    type="radio" 
-                    checked={!useXor} 
-                    onChange={() => setUseXor(false)} 
-                    className="w-4 h-4 text-primary"
-                  />
-                  <div>
-                    <div className="font-medium">Standard</div>
-                    <div className="text-xs text-muted-foreground">No obfuscation</div>
-                  </div>
-                </label>
-              </div>
-            </div>
+          {/* Domain */}
+          <div className="space-y-2">
+            <Label htmlFor="install-domain">Domain / Hostname (optional)</Label>
+            <Input
+              id="install-domain"
+              type="text"
+              placeholder="e.g. vpn.example.com"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Leave empty to use server IP ({defaultHost}).</p>
+          </div>
 
-            {/* Domain */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Domain / Hostname (Optional)</label>
-              <input
+          {/* DNS Mode */}
+          <div className="space-y-2">
+            <Label htmlFor="install-dns">DNS Settings</Label>
+            <select
+              id="install-dns"
+              value={dnsMode}
+              onChange={(e) => setDnsMode(e.target.value as 'standard' | 'empty' | 'custom')}
+              className="w-full bg-background border border-input rounded-md px-3 py-2 h-10 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="standard">Standard (8.8.8.8, 1.1.1.1)</option>
+              <option value="empty">Empty (do not push DNS)</option>
+              <option value="custom">Custom DNS</option>
+            </select>
+            {dnsMode === 'custom' && (
+              <Input
                 type="text"
-                placeholder="e.g. vpn.example.com"
-                value={domain}
-                onChange={e => setDomain(e.target.value)}
-                className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                placeholder="8.8.8.8, 1.1.1.1"
+                value={customDns}
+                onChange={(e) => setCustomDns(e.target.value)}
+                required
+                className="mt-2"
+                aria-label="Custom DNS servers"
               />
-              <p className="text-xs text-muted-foreground">
-                Leave empty to use server IP ({defaultHost}).
-              </p>
-            </div>
+            )}
+          </div>
 
-            {/* DNS Mode */}
+          {/* MTU / MSSFIX */}
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">DNS Settings</label>
-              <select
-                value={dnsMode}
-                onChange={e => setDnsMode(e.target.value as any)}
-                className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="standard">Standard (8.8.8.8, 1.1.1.1)</option>
-                <option value="empty">Empty (Do not push DNS)</option>
-                <option value="custom">Custom DNS</option>
-              </select>
-              {dnsMode === 'custom' && (
-                <input
-                  type="text"
-                  placeholder="8.8.8.8, 1.1.1.1"
-                  value={customDns}
-                  onChange={e => setCustomDns(e.target.value)}
-                  required
-                  className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary mt-2"
-                />
-              )}
+              <Label htmlFor="install-mtu">MTU</Label>
+              <Input id="install-mtu" type="number" value={mtu} onChange={(e) => setMtu(Number(e.target.value))} required min={500} max={9000} />
             </div>
-
-            {/* MTU / MSSFIX */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">MTU</label>
-                <input
-                  type="number"
-                  value={mtu}
-                  onChange={e => setMtu(Number(e.target.value))}
-                  required min={500} max={9000}
-                  className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">MSSFIX</label>
-                <input
-                  type="number"
-                  value={mssfix}
-                  onChange={e => setMssfix(Number(e.target.value))}
-                  required min={500} max={9000}
-                  className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="install-mssfix">MSSFIX</Label>
+              <Input id="install-mssfix" type="number" value={mssfix} onChange={(e) => setMssfix(Number(e.target.value))} required min={500} max={9000} />
             </div>
+          </div>
+        </form>
 
-          </form>
-        </div>
-
-        <div className="p-6 border-t border-border bg-muted/20 flex justify-end gap-3 rounded-b-xl">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary rounded-md transition-colors"
-          >
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
             Cancel
-          </button>
-          <button
-            form="install-form"
-            type="submit"
-            disabled={loading}
-            className="px-6 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-md font-medium transition-colors disabled:opacity-50"
-          >
-            {loading ? 'Starting...' : 'Start Installation'}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button form="install-form" type="submit" disabled={loading} className="gap-2">
+            {loading ? (<><Spinner className="h-4 w-4" />Starting…</>) : 'Start Installation'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

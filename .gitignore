@@ -27,3 +27,16 @@ out/
 
 # Claude
 .claude/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Scratch / local clutter
+/open.md
+/scratch/
+/test.conf
+/ovpn-panel.tar.gz
+
+# Test artifacts
+/test-screenshots*/
+/apps/panel/test-results/

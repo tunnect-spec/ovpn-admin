@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { createClient } from '@playwright/test';
 
 const BASE_URL = 'http://localhost:3000';
 const ADMIN_EMAIL = 'admin@example.com';

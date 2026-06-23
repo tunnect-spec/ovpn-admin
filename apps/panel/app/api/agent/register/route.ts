@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { agentRegisterSchema } from '@ovpn/api';
 import { verifyRegistrationToken, hashApiToken } from '@/lib/crypto';
+import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 
 // POST /api/agent/register - Agent registration (one-time)
 export async function POST(request: NextRequest) {
@@ -96,12 +97,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Register agent error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Registration failed' },

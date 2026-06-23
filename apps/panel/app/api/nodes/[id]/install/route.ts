@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { installNodeSchema } from '@ovpn/api';
-import { jobQueue } from '@/lib/queue';
 import { withAuth } from '@/lib/middleware';
+import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 
 type Params = Promise<{ id: string }>;
 
@@ -78,13 +78,8 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       },
     });
 
-    // Enqueue job
-    await jobQueue.add('node-install', { jobId: job.id }, {
-      jobId: job.id,
-      priority: 10,
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 60000 },
-    });
+    // The PENDING job above is the source of truth — the on-host agent picks it
+    // up via its heartbeat poll. (No separate BullMQ enqueue is needed.)
 
     // Audit log
     await prisma.auditLog.create({
@@ -105,12 +100,7 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       },
     });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Install node error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Failed to trigger install' },

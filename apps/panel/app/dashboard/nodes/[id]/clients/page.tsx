@@ -1,8 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Plus } from 'lucide-react';
+
+import { apiFetch, apiFetchRaw, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { confirm } from '@/components/ui/confirm-dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ErrorState } from '@/components/ui/error-state';
+import { LoadingState } from '@/components/ui/spinner';
+import { getClientStatus } from '@/components/status-config';
 
 interface Client {
   id: string;
@@ -14,82 +24,68 @@ interface Client {
   artifactCount: number;
 }
 
-const statusColors: Record<Client['status'], string> = {
-  ACTIVE: 'text-success',
-  REVOKED: 'text-error',
-  EXPIRED: 'text-muted-foreground',
-};
+const TH = 'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase';
 
 export default function NodeClientsPage() {
   const params = useParams();
   const router = useRouter();
-  const nodeId = params.id as string;
+  const nodeId = typeof params.id === 'string' ? params.id : '';
 
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
-  const [nodeName, setNodeName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const fetchClients = async () => {
-    const admin = localStorage.getItem('admin');
-    if (!admin) {
-      router.push('/login');
-      return;
-    }
-
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const res = await fetch(`/api/nodes/${nodeId}/clients`);
-
-      if (!res.ok) {
-        if (res.status === 401) {
-          localStorage.removeItem('admin');
-          router.push('/login');
-          return;
-        }
-        throw new Error('Failed to fetch clients');
-      }
-
-      const data = await res.json();
+      const data = await apiFetch<{ clients: Client[] }>(`/api/nodes/${nodeId}/clients`);
       setClients(data.clients || []);
-      setLoading(false);
     } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to load clients';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Failed to load clients', description: message });
+    } finally {
       setLoading(false);
     }
-  };
+  }, [nodeId, router]);
 
   useEffect(() => {
-    fetchClients();
-  }, [nodeId]);
+    load();
+  }, [load]);
 
   const handleRevoke = async (clientId: string, clientName: string) => {
-    if (!confirm(`Revoke client "${clientName}"? This action cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Revoke "${clientName}"?`,
+      description: 'The client certificate will be revoked on the node and can no longer connect. This cannot be undone.',
+      confirmLabel: 'Revoke client',
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
-      const res = await fetch(`/api/clients/${clientId}`, {
-        method: 'DELETE',
-      });
-
-      if (res.ok) {
-        fetchClients();
-      } else {
-        const data = await res.json();
-        alert(data.message || 'Failed to revoke client');
-      }
+      await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+      toast({ variant: 'success', title: 'Client revoked', description: clientName });
+      load();
     } catch (err) {
-      console.error(err);
-      alert('Network error while revoking client');
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to revoke client';
+      toast({ variant: 'destructive', title: 'Failed to revoke client', description: message });
     }
   };
 
   const handleDownload = async (clientId: string, clientName: string) => {
+    setDownloadingId(clientId);
     try {
-      const res = await fetch(`/api/clients/${clientId}/download`);
-
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.message || 'Failed to download config');
-        return;
-      }
-
+      const res = await apiFetchRaw(`/api/clients/${clientId}/download`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -99,97 +95,105 @@ export default function NodeClientsPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+      toast({ variant: 'success', title: 'Config downloaded', description: `${clientName}.ovpn` });
     } catch (err) {
-      console.error(err);
-      alert('Network error while downloading config');
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to download config';
+      toast({ variant: 'destructive', title: 'Download failed', description: message });
+    } finally {
+      setDownloadingId(null);
     }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold">Clients</h2>
           <p className="text-muted-foreground mt-1">Manage VPN client configurations</p>
         </div>
-        <Link
-          href={`/dashboard/nodes/${nodeId}/clients/new`}
-          className="px-4 py-2 bg-primary hover:bg-primary-600 rounded-lg"
-        >
-          + Add Client
-        </Link>
+        <Button asChild className="gap-2">
+          <Link href={`/dashboard/nodes/${nodeId}/clients/new`}>
+            <Plus className="h-4 w-4" />
+            Add Client
+          </Link>
+        </Button>
       </div>
 
-      {loading ? (
-        <div className="text-center py-12">Loading...</div>
+      {loading && clients.length === 0 ? (
+        <LoadingState label="Loading clients" />
+      ) : error && clients.length === 0 ? (
+        <ErrorState title="Couldn't load clients" message={error} onRetry={load} retrying={loading} />
       ) : clients.length === 0 ? (
         <div className="bg-card text-card-foreground border border-border rounded-lg p-12 text-center">
           <p className="text-muted-foreground mb-4">No clients have been created yet.</p>
-          <Link
-            href={`/dashboard/nodes/${nodeId}/clients/new`}
-            className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-md font-medium"
-          >
-            Add Your First Client
-          </Link>
+          <Button asChild>
+            <Link href={`/dashboard/nodes/${nodeId}/clients/new`}>Add Your First Client</Link>
+          </Button>
         </div>
       ) : (
         <div className="bg-card text-card-foreground border border-border rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-muted">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
-                  Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
-                  Created
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {clients.map((client) => (
-                <tr key={client.id} className="hover:bg-muted/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <div>
-                      <div className="font-medium text-foreground">{client.name}</div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        {client.fingerprint.slice(0, 16)}...
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={statusColors[client.status]}>{client.status}</span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {new Date(client.createdAt).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    {client.status === 'ACTIVE' && client.artifactCount > 0 && (
-                      <button
-                        onClick={() => handleDownload(client.id, client.name)}
-                        className="text-primary hover:text-primary-600 mr-4"
-                      >
-                        Download
-                      </button>
-                    )}
-                    {client.status === 'ACTIVE' && (
-                      <button
-                        onClick={() => handleRevoke(client.id, client.name)}
-                        className="text-destructive hover:text-destructive/80"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <caption className="sr-only">VPN clients for this node</caption>
+              <thead className="bg-muted">
+                <tr>
+                  <th scope="col" className={TH}>Name</th>
+                  <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>Created</th>
+                  <th scope="col" className={`${TH} text-right`}>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {clients.map((client) => {
+                  const status = getClientStatus(client.status);
+                  return (
+                    <tr key={client.id} className="hover:bg-muted/50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="font-medium text-foreground">{client.name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          {client.fingerprint.slice(0, 16)}…
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <Badge variant={status.variant}>{status.label}</Badge>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
+                        {new Date(client.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right">
+                        <div className="flex justify-end gap-2">
+                          {client.status === 'ACTIVE' && client.artifactCount > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownload(client.id, client.name)}
+                              disabled={downloadingId === client.id}
+                            >
+                              {downloadingId === client.id ? 'Downloading…' : 'Download'}
+                            </Button>
+                          )}
+                          {client.status === 'ACTIVE' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRevoke(client.id, client.name)}
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            >
+                              Revoke
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { updateNodeSchema } from '@ovpn/api';
 import { withAuth } from '@/lib/middleware';
+import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 
 type Params = Promise<{ id: string }>;
 
@@ -96,12 +97,7 @@ export const PATCH = withAuth(async (request: NextRequest, payload, { params }: 
 
     return NextResponse.json({ node: updated });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Update node error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Failed to update node' },

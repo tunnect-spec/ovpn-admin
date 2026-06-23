@@ -1,10 +1,60 @@
 import { prisma } from './prisma';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'change_me_in_production';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY?.padEnd(32, '0').slice(0, 32) || 'default_encryption_key_change_me_32b';
+import { SignJWT, jwtVerify } from 'jose';
 
 // ============================================================================
-// JWT (using Web Crypto API)
+// Secret resolution
+// ----------------------------------------------------------------------------
+// Secrets are resolved lazily (inside functions) rather than at module load so
+// that a missing/weak secret fails the actual request in production instead of
+// crashing the build. In production a missing or default-valued secret is a
+// hard error; in development we fall back to a clearly-insecure value and warn.
+// ============================================================================
+
+const WEAK_SECRETS = new Set([
+  'change_me_in_production',
+  'change_me_in_production_please_use_32_chars_or_more',
+  'default_encryption_key_change_me_32b',
+  'default_salt',
+  'default_api_salt',
+]);
+
+const isProduction = () => process.env.NODE_ENV === 'production';
+
+const warnedFor = new Set<string>();
+function warnOnce(name: string, message: string): void {
+  if (warnedFor.has(name)) return;
+  warnedFor.add(name);
+  console.warn(`[security] ${message}`);
+}
+
+function requireSecret(name: string, value: string | undefined, minLength: number): string {
+  const weak = !value || value.length < minLength || WEAK_SECRETS.has(value);
+  if (weak) {
+    if (isProduction()) {
+      throw new Error(
+        `${name} must be set to a strong, non-default value of at least ${minLength} characters in production.`,
+      );
+    }
+    warnOnce(name, `${name} is missing/weak — using an INSECURE development fallback. Set a strong ${name} before deploying.`);
+    return (value || `insecure_dev_only_${name.toLowerCase()}`).padEnd(minLength, '0');
+  }
+  return value;
+}
+
+function getJwtSecret(): string {
+  return requireSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+}
+
+function getEncryptionKey(): string {
+  return requireSecret('ENCRYPTION_KEY', process.env.ENCRYPTION_KEY, 32).slice(0, 32);
+}
+
+function getApiTokenSalt(): string {
+  return requireSecret('API_TOKEN_SALT', process.env.API_TOKEN_SALT, 16);
+}
+
+// ============================================================================
+// JWT (using jose, HS256)
 // ============================================================================
 
 export interface TokenPayload {
@@ -15,83 +65,33 @@ export interface TokenPayload {
   exp?: number;
 }
 
-// Simple JWT implementation using base64url (for MVP)
-// In production, use jose or similar
 export async function createToken(payload: TokenPayload): Promise<string> {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const exp = now + 7 * 24 * 60 * 60; // 7 days
-
-  const tokenPayload = { ...payload, iat: now, exp };
-
-  const encodedHeader = base64UrlEncode(JSON.stringify(header));
-  const encodedPayload = base64UrlEncode(JSON.stringify(tokenPayload));
-
-  const data = `${encodedHeader}.${encodedPayload}`;
-  const signature = await hmacSha256(data, JWT_SECRET);
-
-  return `${data}.${signature}`;
+  const secret = new TextEncoder().encode(getJwtSecret());
+  return await new SignJWT({ email: payload.email, role: payload.role })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setSubject(payload.sub)
+    .setIssuedAt()
+    .setExpirationTime('7d')
+    .sign(secret);
 }
 
 export async function verifyToken(token: string): Promise<TokenPayload | null> {
   try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
+    const secret = new TextEncoder().encode(getJwtSecret());
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] });
 
-    const [encodedHeader, encodedPayload, signature] = parts;
-    const data = `${encodedHeader}.${encodedPayload}`;
+    if (typeof payload.sub !== 'string') return null;
 
-    // Verify signature
-    const expectedSignature = await hmacSha256(data, JWT_SECRET);
-    if (signature !== expectedSignature) return null;
-
-    // Decode payload
-    const payload = JSON.parse(base64UrlDecode(encodedPayload)) as TokenPayload;
-
-    // Check expiration
-    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
-
-    return payload;
+    return {
+      sub: payload.sub,
+      email: payload.email as string,
+      role: payload.role as string,
+      iat: payload.iat,
+      exp: payload.exp,
+    };
   } catch {
     return null;
   }
-}
-
-function base64UrlEncode(str: string): string {
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-function base64UrlDecode(str: string): string {
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (str.length % 4) str += '=';
-  return atob(str);
-}
-
-async function hmacSha256(data: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(data);
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-
-  const signature = await crypto.subtle.sign('HMAC', key, messageData);
-  const signatureArray = Array.from(new Uint8Array(signature));
-  const binaryString = signatureArray.map(b => String.fromCharCode(b)).join('');
-  return btoa(binaryString)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
 }
 
 import bcrypt from 'bcryptjs';
@@ -115,7 +115,7 @@ export async function verifyPassword(hash: string, password: string): Promise<bo
 
 export async function hashApiToken(token: string): Promise<string> {
   const encoder = new TextEncoder();
-  const data = encoder.encode(token + (process.env.API_TOKEN_SALT || 'default_api_salt'));
+  const data = encoder.encode(token + getApiTokenSalt());
 
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -160,7 +160,7 @@ export async function encrypt(text: string): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(ENCRYPTION_KEY),
+    encoder.encode(getEncryptionKey()),
     { name: 'AES-GCM' },
     false,
     ['encrypt'],
@@ -191,7 +191,7 @@ export async function decrypt(encryptedText: string): Promise<string | null> {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(ENCRYPTION_KEY),
+      encoder.encode(getEncryptionKey()),
       { name: 'AES-GCM' },
       false,
       ['decrypt'],

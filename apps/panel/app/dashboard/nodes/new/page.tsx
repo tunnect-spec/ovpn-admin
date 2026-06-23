@@ -7,7 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Copy, Check, Terminal, Shield, ArrowLeft, Server, Plus } from 'lucide-react';
+import { Copy, Check, Terminal, Shield, ArrowLeft, Plus } from 'lucide-react';
+import { apiFetch, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { Spinner } from '@/components/ui/spinner';
 
 export default function NewNodePage() {
   const router = useRouter();
@@ -26,39 +29,40 @@ export default function NewNodePage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/nodes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const data = await apiFetch<{ registrationToken: string; installCommand: string; node: { id: string; name: string } }>(
+        '/api/nodes',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, host, port: parseInt(port, 10) }),
         },
-        body: JSON.stringify({ name, host, port: parseInt(port) }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || 'Failed to create node');
-        setLoading(false);
+      );
+      setResult(data);
+      toast({ variant: 'success', title: 'Node created', description: `"${data.node.name}" is ready for agent installation.` });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
         return;
       }
-
-      setResult(data);
-      setLoading(false);
-    } catch (err) {
-      setError('Network error. Please try again.');
+      const message = err instanceof Error ? err.message : 'Network error. Please try again.';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Failed to create node', description: message });
+    } finally {
       setLoading(false);
     }
   };
 
-  const copyToken = () => {
-    navigator.clipboard.writeText(result!.registrationToken);
+  const copyToken = async () => {
+    await navigator.clipboard.writeText(result!.registrationToken);
     setCopiedToken(true);
+    toast({ variant: 'success', title: 'Registration token copied' });
     setTimeout(() => setCopiedToken(false), 2000);
   };
 
-  const copyCommand = () => {
-    navigator.clipboard.writeText(result!.installCommand);
+  const copyCommand = async () => {
+    await navigator.clipboard.writeText(result!.installCommand);
     setCopiedCommand(true);
+    toast({ variant: 'success', title: 'Install command copied' });
     setTimeout(() => setCopiedCommand(false), 2000);
   };
 
@@ -67,7 +71,7 @@ export default function NewNodePage() {
       <div className="max-w-3xl space-y-8">
         {/* Header */}
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.push('/dashboard/nodes')}>
+          <Button variant="ghost" size="icon" aria-label="Back to nodes" onClick={() => router.push('/dashboard/nodes')}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div>
@@ -149,6 +153,7 @@ export default function NewNodePage() {
                 onClick={copyCommand}
                 variant="ghost"
                 size="sm"
+                aria-label="Copy install command"
                 className="absolute top-2 right-2"
               >
                 {copiedCommand ? (
@@ -214,7 +219,7 @@ export default function NewNodePage() {
     <div className="max-w-2xl space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => router.back()}>
+        <Button variant="ghost" size="icon" aria-label="Go back" onClick={() => router.back()}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div>
@@ -289,20 +294,18 @@ export default function NewNodePage() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={loading} className="gap-2 group relative overflow-hidden bg-primary hover:bg-primary/90 text-primary-foreground">
-                <span className="relative flex items-center gap-2">
-                  {loading ? (
-                    <>
-                      <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="h-4 w-4" />
-                      Create Node
-                    </>
-                  )}
-                </span>
+              <Button type="submit" disabled={loading} className="gap-2">
+                {loading ? (
+                  <>
+                    <Spinner className="h-4 w-4" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4" />
+                    Create Node
+                  </>
+                )}
               </Button>
             </div>
           </form>

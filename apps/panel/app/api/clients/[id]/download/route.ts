@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withAuth } from '@/lib/middleware';
+import { decrypt } from '@/lib/crypto';
 
 type Params = Promise<{ id: string }>;
 
@@ -16,7 +17,9 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
         artifacts: {
           where: {
             artifactType: 'OVPN',
-            expiresAt: { gte: new Date() },
+            // null expiresAt means "never expires" (e.g. client created without
+            // an expiry); treat those as valid alongside not-yet-expired ones.
+            OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
           },
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -46,8 +49,10 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
       );
     }
 
-    // Get content from storage (MVP: stored directly in storagePath)
-    const content = artifact.storagePath || '';
+    // Decrypt at-rest config; fall back to the stored value for legacy
+    // plaintext rows that predate at-rest encryption.
+    const stored = artifact.storagePath || '';
+    const content = (stored && (await decrypt(stored))) || stored;
 
     if (!content) {
       return NextResponse.json(
@@ -73,7 +78,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
       headers: {
         'Content-Type': 'application/x-openvpn-config',
         'Content-Disposition': `attachment; filename="${client.name}.ovpn"`,
-        'Content-Length': artifact.sizeBytes.toString(),
+        'Content-Length': Buffer.byteLength(content).toString(),
       },
     });
   } catch (error) {

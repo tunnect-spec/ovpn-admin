@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Shield, Lock, Mail, AlertCircle } from 'lucide-react';
+
+import { apiFetch, ApiError } from '@/components/use-api';
+import { Spinner } from '@/components/ui/spinner';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,38 +18,26 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const admin = localStorage.getItem('admin');
-    if (admin) {
-      router.push('/dashboard');
-    }
-  }, [router]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || 'Login failed');
-        setLoading(false);
-        return;
-      }
-
-      localStorage.setItem('admin', JSON.stringify(data.admin));
-
+      // The session cookie is set server-side; nothing to read from the body.
       router.push('/dashboard');
     } catch (err) {
-      setError('Network error. Please try again.');
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : 'Network error. Please try again.';
+      setError(message);
       setLoading(false);
     }
   };
@@ -70,8 +61,11 @@ export default function LoginPage() {
 
         <CardContent className="space-y-6">
           {error && (
-            <div className="flex items-center gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <div
+              role="alert"
+              className="flex items-center gap-3 p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm"
+            >
+              <AlertCircle aria-hidden="true" className="h-4 w-4 flex-shrink-0" />
               {error}
             </div>
           )}
@@ -82,7 +76,7 @@ export default function LoginPage() {
                 Email
               </Label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Mail aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   id="email"
                   type="email"
@@ -100,7 +94,7 @@ export default function LoginPage() {
                 Password
               </Label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Lock aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   id="password"
                   type="password"
@@ -122,8 +116,8 @@ export default function LoginPage() {
               <span className="relative flex items-center gap-2">
                 {loading ? (
                   <>
-                    <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Logging in...
+                    <Spinner className="h-4 w-4" label="Logging in" />
+                    Logging in…
                   </>
                 ) : (
                   <>

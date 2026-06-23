@@ -1,29 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { agentHeartbeatSchema } from '@ovpn/api';
-import { verifyApiToken } from '@/lib/crypto';
-import { jobQueue } from '@/lib/queue';
+import { authenticateAgent, agentUnauthorized, isZodError, zodErrorResponse } from '@/lib/api-helpers';
 
 // POST /api/agent/heartbeat - Agent heartbeat
 export async function POST(request: NextRequest) {
   try {
-    // Verify token
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'INVALID_TOKEN', message: 'Missing or invalid token' },
-        { status: 401 },
-      );
-    }
-
-    const token = authHeader.slice(7);
-    const nodeId = await verifyApiToken(token);
-    if (!nodeId) {
-      return NextResponse.json(
-        { error: 'INVALID_TOKEN', message: 'Token verification failed' },
-        { status: 401 },
-      );
-    }
+    const nodeId = await authenticateAgent(request);
+    if (!nodeId) return agentUnauthorized();
 
     const body = await request.json();
     const input = agentHeartbeatSchema.parse({ ...body, nodeId });
@@ -61,11 +45,21 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Store health check
+    // Store health check. Derive health from the agent-reported status and
+    // resource pressure rather than always recording HEALTHY.
+    const cpu = input.details?.cpu ?? 0;
+    const disk = input.details?.disk ?? 0;
+    const healthStatus =
+      input.status === 'ERROR' || input.status === 'STOPPED'
+        ? 'DOWN'
+        : cpu >= 95 || disk >= 95
+          ? 'DEGRADED'
+          : 'HEALTHY';
+
     await prisma.healthCheck.create({
       data: {
         nodeId,
-        status: input.details?.connectedClients !== undefined ? 'HEALTHY' : 'HEALTHY',
+        status: healthStatus,
         details: input.details ?? {},
         checkedAt: now,
       },
@@ -105,12 +99,7 @@ export async function POST(request: NextRequest) {
       pendingJobs,
     });
   } catch (error) {
-    if (error instanceof Error && 'name' in error && error.name === 'ZodError') {
-      return NextResponse.json(
-        { error: 'INVALID_INPUT', issues: error },
-        { status: 400 },
-      );
-    }
+    if (isZodError(error)) return zodErrorResponse(error);
     console.error('Heartbeat error:', error);
     return NextResponse.json(
       { error: 'INTERNAL_ERROR', message: 'Heartbeat failed' },

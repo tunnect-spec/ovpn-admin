@@ -1,19 +1,35 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+
+import { apiFetch, ApiError, UnauthorizedError } from '@/components/use-api';
+import { toast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@/components/ui/card';
+import { Spinner } from '@/components/ui/spinner';
+import { TERMINAL_JOB_STATUSES } from '@/components/status-config';
+
+const EXPIRY_OPTIONS = [
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '365', label: '1 year' },
+  { value: '730', label: '2 years' },
+  { value: 'never', label: 'Never' },
+] as const;
 
 export default function NewClientPage() {
   const params = useParams();
   const router = useRouter();
-  const nodeId = params.id as string;
+  const nodeId = typeof params.id === 'string' ? params.id : '';
 
   const [name, setName] = useState('');
   const [expiresIn, setExpiresIn] = useState('365');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [jobId, setJobId] = useState<string | null>(null);
-  const [polling, setPolling] = useState(false);
   const [jobStatus, setJobStatus] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,56 +38,86 @@ export default function NewClientPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(`/api/nodes/${nodeId}/clients`, {
+      const data = await apiFetch<{ job: { id: string; status: string } }>(`/api/nodes/${nodeId}/clients`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          expiresIn: expiresIn === 'never' ? undefined : parseInt(expiresIn),
+          expiresIn: expiresIn === 'never' ? undefined : parseInt(expiresIn, 10),
         }),
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.message || 'Failed to create client');
-        setLoading(false);
+      setJobId(data.job.id);
+      setJobStatus(data.job.status || 'PENDING');
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
         return;
       }
-
-      setJobId(data.job.id);
-      setJobStatus('pending');
-      setPolling(true);
-      setLoading(false);
-    } catch (err) {
-      setError('Network error. Please try again.');
+      const message = err instanceof Error ? err.message : 'Network error. Please try again.';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Failed to create client', description: message });
       setLoading(false);
     }
   };
 
-  // Poll job status
+  // Poll job status with a self-scheduling timeout (never overlaps) + abort on unmount.
+  const mountedRef = useRef(true);
   useEffect(() => {
-    if (!polling || !jobId) return;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-    const interval = setInterval(async () => {
-      const response = await fetch(`/api/jobs/${jobId}`);
-      const data = await response.json();
+  useEffect(() => {
+    if (!jobId) return;
 
-      setJobStatus(data.job.status);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-      if (data.job.status === 'COMPLETED') {
-        setPolling(false);
-        router.push(`/dashboard/nodes/${nodeId}/clients`);
-      } else if (data.job.status === 'FAILED') {
-        setPolling(false);
-        setError(data.job.error || 'Failed to create client');
+    const poll = async () => {
+      try {
+        const data = await apiFetch<{ job: { status: string; error: string | null } }>(`/api/jobs/${jobId}`, {
+          signal: controller.signal,
+        });
+        if (!mountedRef.current) return;
+
+        setJobStatus(data.job.status);
+
+        if (data.job.status === 'COMPLETED') {
+          toast({ variant: 'success', title: 'Client created' });
+          router.push(`/dashboard/nodes/${nodeId}/clients`);
+          return;
+        }
+        if (TERMINAL_JOB_STATUSES.has(data.job.status)) {
+          setLoading(false);
+          const message = data.job.error || 'Client creation did not complete.';
+          setError(message);
+          toast({ variant: 'destructive', title: 'Client creation failed', description: message });
+          return;
+        }
+        // Not terminal yet — schedule the next poll only now.
+        timer = setTimeout(poll, 2000);
+      } catch (err) {
+        if (controller.signal.aborted || !mountedRef.current) return;
+        if (err instanceof UnauthorizedError) {
+          router.push('/login');
+          return;
+        }
+        // Transient error — keep polling but surface it once.
+        const message = err instanceof ApiError ? err.message : 'Lost connection while tracking the job.';
+        setError(message);
+        timer = setTimeout(poll, 3000);
       }
-    }, 2000);
+    };
 
-    return () => clearInterval(interval);
-  }, [polling, jobId, nodeId, router]);
+    poll();
+
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
+  }, [jobId, nodeId, router]);
 
   return (
     <div className="w-full space-y-6">
@@ -81,51 +127,46 @@ export default function NewClientPage() {
       </div>
 
       {error && (
-        <div className="p-3 bg-error/10 border border-error/20 rounded-lg text-error">
+        <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
           {error}
         </div>
       )}
 
-      {polling ? (
-        <div className="w-full bg-card text-card-foreground border border-border rounded-lg p-16 text-center shadow-lg mx-auto">
-          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-muted-foreground mb-2">Creating client configuration...</p>
-          <p className="text-sm text-muted-foreground">Status: {jobStatus}</p>
-        </div>
+      {jobId ? (
+        <Card className="max-w-2xl">
+          <CardContent className="py-16 text-center">
+            <Spinner className="mx-auto mb-4 h-8 w-8 text-primary" label="Creating client" />
+            <p className="text-muted-foreground mb-2">Creating client configuration…</p>
+            <p className="text-sm text-muted-foreground">Status: {jobStatus || 'PENDING'}</p>
+          </CardContent>
+        </Card>
       ) : (
-        <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-4 max-w-2xl">
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-2">
-              Client Name
-            </label>
-            <input
-              id="name"
+        <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-5 max-w-2xl">
+          <div className="space-y-2">
+            <Label htmlFor="client-name">Client Name</Label>
+            <Input
+              id="client-name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
               pattern="^[a-zA-Z0-9._-]+$"
-              className="w-full px-4 py-2 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
               placeholder="e.g., user1, laptop, iphone-john"
             />
-            <p className="text-xs text-muted-foreground mt-1">Letters, numbers, dots, underscores, hyphens only</p>
+            <p className="text-xs text-muted-foreground">Letters, numbers, dots, underscores, hyphens only</p>
           </div>
 
-          <div>
-            <label htmlFor="expires" className="block text-sm font-medium mb-2">
-              Expires In
-            </label>
+          <div className="space-y-2">
+            <Label htmlFor="client-expires">Expires In</Label>
             <select
-              id="expires"
+              id="client-expires"
               value={expiresIn}
               onChange={(e) => setExpiresIn(e.target.value)}
-              className="w-full px-4 py-2 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
+              className="w-full px-4 py-2 h-10 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="30">30 days</option>
-              <option value="90">90 days</option>
-              <option value="365">1 year</option>
-              <option value="730">2 years</option>
-              <option value="never">Never</option>
+              {EXPIRY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 
@@ -134,21 +175,20 @@ export default function NewClientPage() {
             <p className="mt-1">The client app must support OpenVPN XOR / scramble xormask.</p>
           </div>
 
-          <div className="flex justify-end gap-4 pt-4">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border rounded-md"
-            >
+          <div className="flex justify-end gap-3 pt-2">
+            <Button type="button" variant="outline" onClick={() => router.back()}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-md font-medium"
-            >
-              {loading ? 'Creating...' : 'Create Client'}
-            </button>
+            </Button>
+            <Button type="submit" disabled={loading} className="gap-2">
+              {loading ? (
+                <>
+                  <Spinner className="h-4 w-4" />
+                  Creating…
+                </>
+              ) : (
+                'Create Client'
+              )}
+            </Button>
           </div>
         </form>
       )}

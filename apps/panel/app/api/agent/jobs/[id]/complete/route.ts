@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyApiToken } from '@/lib/crypto';
+import { verifyApiToken, encrypt } from '@/lib/crypto';
 
 type Params = Promise<{ id: string }>;
 
@@ -105,12 +105,13 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         // Create artifact
         if (ovpnContent) {
           const ovpnDecoded = Buffer.from(ovpnContent, 'base64').toString('utf-8');
+          // The .ovpn config embeds the client private key — encrypt it at rest.
           await prisma.clientArtifact.create({
             data: {
               clientId: client.id,
               nodeId,
               artifactType: 'OVPN',
-              storagePath: ovpnDecoded,
+              storagePath: await encrypt(ovpnDecoded),
               contentHash: fingerprint || '',
               sizeBytes: ovpnDecoded.length,
               downloadUrl: null,
