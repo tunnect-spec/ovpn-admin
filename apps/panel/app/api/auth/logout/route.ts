@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth';
+import { authenticateRequest, SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { cookies } from 'next/headers';
 
@@ -26,8 +26,10 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Overwrite with an immediately-expiring cookie that carries the same
+    // attributes (path/secure) so the browser reliably drops it.
     const cookieStore = await cookies();
-    cookieStore.delete('auth_token');
+    cookieStore.set(SESSION_COOKIE, '', { ...sessionCookieOptions(request), maxAge: 0 });
 
     // Client-side should discard token
     // No server-side token blacklist (stateless)

@@ -4,6 +4,7 @@ import { loginSchema } from '@ovpn/api';
 import { verifyPassword, createToken } from '@/lib/crypto';
 import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
 import { rateLimit } from '@/lib/rate-limit';
+import { SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth';
 
 // POST /api/auth/login
 export async function POST(request: NextRequest) {
@@ -60,12 +61,7 @@ export async function POST(request: NextRequest) {
 
     const { cookies } = await import('next/headers');
     const cookieStore = await cookies();
-    cookieStore.set('auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-    });
+    cookieStore.set(SESSION_COOKIE, token, sessionCookieOptions(request));
 
     // Audit log
     await prisma.auditLog.create({
