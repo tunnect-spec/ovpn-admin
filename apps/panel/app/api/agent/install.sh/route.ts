@@ -5,7 +5,7 @@ import { join } from 'path';
 // GET /api/agent/install.sh - Return agent installation script
 export async function GET(request: NextRequest) {
   try {
-    const scriptPath = join(process.cwd(), 'public/api/agent/install.sh');
+    const scriptPath = join(process.cwd(), '../../install-agent.sh');
     const script = readFileSync(scriptPath, 'utf-8');
 
     return new NextResponse(script, {

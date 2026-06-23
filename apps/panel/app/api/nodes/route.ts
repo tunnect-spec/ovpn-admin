@@ -127,7 +127,6 @@ async function POST_handler(request: NextRequest, payload: any) {
         name: node.name,
         host: node.host,
         status: node.status,
-        apiToken: apiToken.slice(0, 16) + '...', // Show partial only
       },
       installCommand,
       registrationToken,

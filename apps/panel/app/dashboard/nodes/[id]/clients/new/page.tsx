@@ -77,7 +77,7 @@ export default function NewClientPage() {
     <div className="w-full space-y-6">
       <div>
         <h2 className="text-2xl font-bold">Add New Client</h2>
-        <p className="text-gray-400 mt-1">Create a VPN client configuration</p>
+        <p className="text-muted-foreground mt-1">Create a VPN client configuration</p>
       </div>
 
       {error && (
@@ -89,8 +89,8 @@ export default function NewClientPage() {
       {polling ? (
         <div className="w-full bg-card text-card-foreground border border-border rounded-lg p-16 text-center shadow-lg mx-auto">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-gray-400 mb-2">Creating client configuration...</p>
-          <p className="text-sm text-gray-500">Status: {jobStatus}</p>
+          <p className="text-muted-foreground mb-2">Creating client configuration...</p>
+          <p className="text-sm text-muted-foreground">Status: {jobStatus}</p>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-4 max-w-2xl">
@@ -108,7 +108,7 @@ export default function NewClientPage() {
               className="w-full px-4 py-2 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
               placeholder="e.g., user1, laptop, iphone-john"
             />
-            <p className="text-xs text-gray-400 mt-1">Letters, numbers, dots, underscores, hyphens only</p>
+            <p className="text-xs text-muted-foreground mt-1">Letters, numbers, dots, underscores, hyphens only</p>
           </div>
 
           <div>

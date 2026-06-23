@@ -17,7 +17,7 @@ interface Client {
 const statusColors: Record<Client['status'], string> = {
   ACTIVE: 'text-success',
   REVOKED: 'text-error',
-  EXPIRED: 'text-gray-400',
+  EXPIRED: 'text-muted-foreground',
 };
 
 export default function NodeClientsPage() {
@@ -63,36 +63,46 @@ export default function NodeClientsPage() {
   const handleRevoke = async (clientId: string, clientName: string) => {
     if (!confirm(`Revoke client "${clientName}"? This action cannot be undone.`)) return;
 
-    const res = await fetch(`/api/clients/${clientId}`, {
-      method: 'DELETE',
-    });
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: 'DELETE',
+      });
 
-    if (res.ok) {
-      fetchClients();
-    } else {
-      const data = await res.json();
-      alert(data.message || 'Failed to revoke client');
+      if (res.ok) {
+        fetchClients();
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Failed to revoke client');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error while revoking client');
     }
   };
 
   const handleDownload = async (clientId: string, clientName: string) => {
-    const res = await fetch(`/api/clients/${clientId}/download`);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/download`);
 
-    if (!res.ok) {
-      const data = await res.json();
-      alert(data.message || 'Failed to download config');
-      return;
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.message || 'Failed to download config');
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${clientName}.ovpn`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Network error while downloading config');
     }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${clientName}.ovpn`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -100,7 +110,7 @@ export default function NodeClientsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Clients</h2>
-          <p className="text-gray-400 mt-1">Manage VPN client configurations</p>
+          <p className="text-muted-foreground mt-1">Manage VPN client configurations</p>
         </div>
         <Link
           href={`/dashboard/nodes/${nodeId}/clients/new`}

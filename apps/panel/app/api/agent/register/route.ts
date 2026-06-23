@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     await prisma.node.update({
       where: { id: node.id },
       data: {
-        status: 'PENDING',
+        status: 'PROVISIONING',
         version: input.agentVersion,
         lastHeartbeatAt: new Date(),
         apiToken: hashedApiToken,

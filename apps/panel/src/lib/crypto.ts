@@ -94,24 +94,19 @@ async function hmacSha256(data: string, secret: string): Promise<string> {
     .replace(/=/g, '');
 }
 
+import bcrypt from 'bcryptjs';
+
 // ============================================================================
 // Password Hashing
 // ============================================================================
 
 export async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + (process.env.PASSWORD_SALT || 'default_salt'));
-
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  return hashHex;
+  const saltRounds = 12;
+  return await bcrypt.hash(password, saltRounds);
 }
 
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {
-  const computedHash = await hashPassword(password);
-  return hash === computedHash;
+  return await bcrypt.compare(password, hash);
 }
 
 // ============================================================================

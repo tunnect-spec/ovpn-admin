@@ -20,7 +20,7 @@ const navigation = [
   { name: "Audit Logs", href: "/dashboard/audit", icon: FileText },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ userEmail }: { userEmail?: string }) {
   const pathname = usePathname();
 
   return (
@@ -60,12 +60,12 @@ export function AppSidebar() {
       {/* User section */}
       <div className="border-t border-border/50 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
-            A
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground uppercase">
+            {userEmail ? userEmail[0] : 'A'}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-foreground truncate">Admin</p>
-            <p className="text-xs text-muted-foreground truncate">admin@example.com</p>
+            <p className="text-xs text-muted-foreground truncate">{userEmail || 'admin@example.com'}</p>
           </div>
         </div>
         <Link

@@ -60,15 +60,20 @@ export default function JobsPage() {
   const handleCancel = async (jobId: string) => {
     if (!confirm('Cancel this job?')) return;
 
-    const res = await fetch(`/api/jobs/${jobId}`, {
-      method: 'DELETE',
-    });
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'DELETE',
+      });
 
-    if (res.ok) {
-      fetchJobs();
-    } else {
-      const data = await res.json();
-      alert(data.message || 'Failed to cancel job');
+      if (res.ok) {
+        fetchJobs();
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Failed to cancel job');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error while cancelling job');
     }
   };
 

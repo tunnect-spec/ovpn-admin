@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { jobQueue } from '@/lib/queue';
+import { withAuth } from '@/lib/middleware';
 
 type Params = Promise<{ id: string }>;
 
 // GET /api/jobs/:id - Get job details
-export async function GET(request: NextRequest, { params }: { params: Params }) {
+export const GET = withAuth(async (request: NextRequest, { params }: { params: Params }) => {
   try {
     const { id } = await params;
 
@@ -49,10 +50,10 @@ export async function GET(request: NextRequest, { params }: { params: Params }) 
       { status: 500 },
     );
   }
-}
+});
 
 // DELETE /api/jobs/:id - Cancel job
-export async function DELETE(request: NextRequest, { params }: { params: Params }) {
+export const DELETE = withAuth(async (request: NextRequest, { params }: { params: Params }) => {
   try {
     const { id } = await params;
 
@@ -96,4 +97,4 @@ export async function DELETE(request: NextRequest, { params }: { params: Params 
       { status: 500 },
     );
   }
-}
+});

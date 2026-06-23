@@ -66,12 +66,20 @@ export default function NodesPage() {
   const handleDelete = async (nodeId: string, nodeName: string) => {
     if (!confirm(`Delete node "${nodeName}"?`)) return;
 
-    const res = await fetch(`/api/nodes/${nodeId}`, {
-      method: 'DELETE',
-    });
+    try {
+      const res = await fetch(`/api/nodes/${nodeId}`, {
+        method: 'DELETE',
+      });
 
-    if (res.ok) {
-      setNodes(nodes.filter(n => n.id !== nodeId));
+      if (res.ok) {
+        setNodes(nodes.filter(n => n.id !== nodeId));
+      } else {
+        const data = await res.json();
+        alert(data.message || 'Failed to delete node');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error while deleting node');
     }
   };
 

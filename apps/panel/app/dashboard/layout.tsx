@@ -1,15 +1,28 @@
 import { AppSidebar } from "@/components/app-sidebar";
+import { cookies } from "next/headers";
+import { verifyToken } from "@/lib/crypto";
 
-export default function DashboardLayout({
+export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('auth_token')?.value;
+  let userEmail = '';
+
+  if (token) {
+    const payload = await verifyToken(token);
+    if (payload) {
+      userEmail = payload.email;
+    }
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Background solid effect handled by bg-background */}
 
-      <AppSidebar />
+      <AppSidebar userEmail={userEmail} />
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">

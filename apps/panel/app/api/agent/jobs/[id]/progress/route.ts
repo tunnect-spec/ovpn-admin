@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@ovpn/db';
+import { verifyApiToken } from '@/lib/crypto';
 
 export async function POST(
   request: Request,
@@ -14,13 +15,9 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Fast token validation without joining
-    const node = await prisma.node.findFirst({
-      where: { apiToken: token },
-      select: { id: true },
-    });
+    const nodeId = await verifyApiToken(token);
 
-    if (!node) {
+    if (!nodeId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -28,7 +25,7 @@ export async function POST(
       where: { id },
     });
 
-    if (!job || job.nodeId !== node.id) {
+    if (!job || job.nodeId !== nodeId) {
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 

@@ -37,6 +37,14 @@ const statusColors: Record<string, string> = {
   ERROR: 'bg-destructive',
 };
 
+const statusBgColors: Record<string, string> = {
+  PENDING: 'bg-muted/20 text-muted-foreground',
+  PROVISIONING: 'bg-blue-500/20 text-blue-500',
+  HEALTHY: 'bg-emerald-500/20 text-emerald-500',
+  UNHEALTHY: 'bg-yellow-500/20 text-yellow-500',
+  ERROR: 'bg-destructive/20 text-destructive',
+};
+
 const statusLabels: Record<string, string> = {
   PENDING: 'Pending Agent',
   PROVISIONING: 'Installing',
@@ -210,7 +218,7 @@ export default function NodeDetailsPage() {
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold">{node.name}</h2>
             <span className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-              statusColors[node.status]?.replace('bg-', 'bg-') + ' bg-opacity-20'
+              statusBgColors[node.status] || statusBgColors.PENDING
             }`}>
               <span className={`w-2 h-2 rounded-full ${statusColors[node.status]}`} />
               {statusLabels[node.status] || node.status}
@@ -350,7 +358,7 @@ function MetricCard({ label, value }: { label: string; value: string | number })
   return (
     <div>
       <div className="text-2xl font-bold">{value}</div>
-      <div className="text-sm text-gray-400">{label}</div>
+      <div className="text-sm text-muted-foreground">{label}</div>
     </div>
   );
 }

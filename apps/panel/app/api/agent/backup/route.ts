@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@ovpn/db';
-
-
+import { hashApiToken } from '@/lib/crypto';
 
 async function authenticate(request: Request) {
   const authHeader = request.headers.get('authorization');
   const token = authHeader?.split('Bearer ')[1];
   if (!token) return null;
 
+  const hashedToken = await hashApiToken(token);
+
   return await prisma.node.findFirst({
-    where: { apiToken: token },
+    where: { apiToken: hashedToken },
     select: { id: true, pkiBackup: true },
   });
 }
