@@ -36,8 +36,7 @@ RUN mkdir -p .next
 RUN chown -R nextjs:nodejs /app
 
 COPY --from=builder --chown=nextjs:nodejs /app/apps/panel/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/apps/panel/.next/static ./
-
+COPY --from=builder --chown=nextjs:nodejs /app/apps/panel/.next/static ./apps/panel/.next/static
 USER nextjs
 
 EXPOSE 3000
