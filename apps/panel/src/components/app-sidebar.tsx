@@ -28,17 +28,17 @@ export function AppSidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center px-6 border-b border-border/50">
         <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 premium-glow-sm">
-            <Shield className="h-5 w-5 text-white" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary premium-glow-sm">
+            <Shield className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-lg font-semibold gradient-text">VPN Admin</span>
+          <span className="text-lg font-semibold text-primary">VPN Admin</span>
         </Link>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4">
         {navigation.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          const isActive = item.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(item.href);
           return (
             <Link
               key={item.name}
@@ -60,7 +60,7 @@ export function AppSidebar() {
       {/* User section */}
       <div className="border-t border-border/50 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-purple-600 text-sm font-medium text-white">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
             A
           </div>
           <div className="flex-1 min-w-0">

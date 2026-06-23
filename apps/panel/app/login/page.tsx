@@ -53,21 +53,16 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background relative overflow-hidden">
-      {/* Background effects */}
-      <div className="absolute inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(96,165,250,0.15),transparent)]" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-blue-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-purple-500/10 rounded-full blur-3xl" />
-      </div>
+      {/* Background solid effect handled by bg-background */}
 
       <Card className="w-full max-w-md glass premium-glow mx-4">
         <CardHeader className="text-center space-y-2 pb-6">
           <div className="flex justify-center">
-            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center premium-glow">
-              <Shield className="h-8 w-8 text-white" />
+            <div className="h-16 w-16 rounded-2xl bg-primary flex items-center justify-center premium-glow-sm">
+              <Shield className="h-8 w-8 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl font-bold gradient-text">OpenVPN Admin</CardTitle>
+          <CardTitle className="text-2xl font-bold text-primary">OpenVPN Admin</CardTitle>
           <CardDescription className="text-base">
             Enter your credentials to access the admin panel
           </CardDescription>
@@ -121,10 +116,9 @@ export default function LoginPage() {
             <Button
               type="submit"
               disabled={loading}
-              className="w-full h-11 text-base relative overflow-hidden group"
+              className="w-full h-11 text-base relative"
               size="lg"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
               <span className="relative flex items-center gap-2">
                 {loading ? (
                   <>

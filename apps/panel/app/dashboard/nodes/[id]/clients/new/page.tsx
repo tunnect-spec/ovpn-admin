@@ -87,13 +87,13 @@ export default function NewClientPage() {
       )}
 
       {polling ? (
-        <div className="bg-bg-secondary border border-border rounded-lg p-8 text-center">
+        <div className="bg-card text-card-foreground border border-border rounded-lg p-8 text-center">
           <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
           <p className="text-gray-400 mb-2">Creating client configuration...</p>
           <p className="text-sm text-gray-500">Status: {jobStatus}</p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="bg-bg-secondary border border-border rounded-lg p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-4">
           <div>
             <label htmlFor="name" className="block text-sm font-medium mb-2">
               Client Name
@@ -105,7 +105,7 @@ export default function NewClientPage() {
               onChange={(e) => setName(e.target.value)}
               required
               pattern="^[a-zA-Z0-9._-]+$"
-              className="w-full px-4 py-2 bg-bg-tertiary border border-border rounded-lg focus:outline-none focus:border-primary"
+              className="w-full px-4 py-2 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
               placeholder="e.g., user1, laptop, iphone-john"
             />
             <p className="text-xs text-gray-400 mt-1">Letters, numbers, dots, underscores, hyphens only</p>
@@ -119,7 +119,7 @@ export default function NewClientPage() {
               id="expires"
               value={expiresIn}
               onChange={(e) => setExpiresIn(e.target.value)}
-              className="w-full px-4 py-2 bg-bg-tertiary border border-border rounded-lg focus:outline-none focus:border-primary"
+              className="w-full px-4 py-2 bg-background text-foreground border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:border-input"
             >
               <option value="30">30 days</option>
               <option value="90">90 days</option>
@@ -129,7 +129,7 @@ export default function NewClientPage() {
             </select>
           </div>
 
-          <div className="bg-bg-tertiary border border-border rounded p-4 text-sm text-gray-400">
+          <div className="bg-muted text-muted-foreground border border-border rounded p-4 text-sm">
             <p>After creation, the .ovpn file will be available for download.</p>
             <p className="mt-1">The client app must support OpenVPN XOR / scramble xormask.</p>
           </div>
@@ -138,14 +138,14 @@ export default function NewClientPage() {
             <button
               type="button"
               onClick={() => router.back()}
-              className="px-4 py-2 bg-bg-tertiary hover:bg-bg-tertiary/80 border border-border rounded-lg"
+              className="px-4 py-2 bg-secondary text-secondary-foreground hover:bg-secondary/80 border border-border rounded-md"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 bg-primary hover:bg-primary-600 disabled:bg-primary-50 disabled:cursor-not-allowed rounded-lg"
+              className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed rounded-md font-medium"
             >
               {loading ? 'Creating...' : 'Create Client'}
             </button>
