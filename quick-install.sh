@@ -128,8 +128,10 @@ else
   CF="$CF -f docker/compose.host.yml"; CFA="$CFA -f $REPO_DIR/docker/compose.host.yml"
 fi
 
-log "[5/6] Starting containers + applying schema + admin…"
-docker compose --env-file .env $CF up -d
+log "[5/6] Starting database + applying schema + admin…"
+# Bring up the datastore first and apply the schema BEFORE the worker/panel start,
+# so the long-running worker never races ahead of an empty database.
+docker compose --env-file .env $CF up -d postgres redis
 for i in $(seq 1 60); do
   docker compose --env-file .env $CF exec -T postgres pg_isready -U ovpn >/dev/null 2>&1 && break
   sleep 2
@@ -137,6 +139,8 @@ done
 docker compose --env-file .env $CF run --rm --no-deps --user root \
   -e SEED_ADMIN_EMAIL="$ADMIN_EMAIL" -e SEED_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   worker sh -lc "corepack enable >/dev/null 2>&1; pnpm prisma db push && pnpm exec tsx prisma/seed.ts"
+log "Starting panel + worker…"
+docker compose --env-file .env $CF up -d
 
 log "[6/6] Waiting for the panel to respond…"
 PANEL_OK=0
