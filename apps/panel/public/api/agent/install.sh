@@ -344,13 +344,13 @@ mv EasyRSA-3.1.7/* .
 
 ./easyrsa init-pki > /dev/null 2>&1
 echo "  {CA_creation_started}"
-./easyrsa --batch build-ca nopass > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa build-ca nopass > /dev/null 2>&1
 echo "  {CA_created}"
 
-yes yes | ./easyrsa build-server-full server nopass > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass > /dev/null 2>&1
 echo "  {Server_cert_created}"
 
-./easyrsa gen-crl > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa gen-crl > /dev/null 2>&1
 
 # Copy certificates
 cp pki/{ca.crt,crl.pem} "$OVPN_DIR/"
@@ -389,6 +389,7 @@ key $OVPN_DIR/server.key
 dh none
 tls-groups secp256r1
 tls-crypt $OVPN_DIR/ta.key
+crl-verify $OVPN_DIR/crl.pem
 
 server 10.8.0.0 255.255.255.0
 push "redirect-gateway def1 bypass-dhcp"
@@ -457,6 +458,7 @@ iptables -A INPUT -i tun0 -j ACCEPT 2>/dev/null || true
 iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${MAIN_INTERFACE} -j MASQUERADE 2>/dev/null || true
 iptables -A FORWARD -i tun0 -j ACCEPT 2>/dev/null || true
 iptables -A FORWARD -o tun0 -j ACCEPT 2>/dev/null || true
+iptables -A FORWARD -i ${MAIN_INTERFACE} -o tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
 
 # Save iptables rules
 echo -e "  ${CYAN}Saving firewall rules...${NC}"
@@ -507,12 +509,12 @@ echo -e "${CYAN}[Step 9/10]${NC} Creating admin scripts..."
 cat > "$ADMIN_DIR/add-user.sh" << 'EOFCREATE'
 #!/bin/bash
 set -e
-USER="$1"
-[ -z "$USER" ] && { echo "Usage: $0 <username>"; exit 1; }
+USER_NAME="$1"
+[ -z "$USER_NAME" ] && { echo "Usage: $0 <username>"; exit 1; }
 OVPN_DIR="/etc/openvpn/xor"
 ADMIN_DIR="/root/ovpn-xor-admin"
 cd "$OVPN_DIR/easy-rsa"
-yes yes | ./easyrsa build-client-full "$USER" nopass > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass > /dev/null 2>&1
 SERVER_IP="$(curl -s -4 ifconfig.me || echo 'SERVER_IP')"
 XOR_MASK="$(cat $OVPN_DIR/xormask.txt 2>/dev/null || echo '')"
 
@@ -523,7 +525,7 @@ else
     XOR_LINE=""
 fi
 
-cat > "$ADMIN_DIR/clients/$USER.ovpn" << EOF
+cat > "$ADMIN_DIR/clients/$USER_NAME.ovpn" << EOF
 client
 dev tun
 proto udp
@@ -542,16 +544,16 @@ verb 3
 $(cat $OVPN_DIR/ca.crt)
 </ca>
 <cert>
-$(openssl x509 -in $OVPN_DIR/easy-rsa/pki/issued/$USER.crt)
+$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$OVPN_DIR/easy-rsa/pki/issued/$USER_NAME.crt")
 </cert>
 <key>
-$(cat $OVPN_DIR/easy-rsa/pki/private/$USER.key)
+$(cat $OVPN_DIR/easy-rsa/pki/private/$USER_NAME.key)
 </key>
 <tls-crypt>
 $(cat $OVPN_DIR/ta.key)
 </tls-crypt>
 EOF
-echo "Client $USER created: $ADMIN_DIR/clients/$USER.ovpn"
+echo "Client $USER_NAME created: $ADMIN_DIR/clients/$USER_NAME.ovpn"
 EOFCREATE
 
 chmod +x "$ADMIN_DIR/add-user.sh"
@@ -560,15 +562,15 @@ chmod +x "$ADMIN_DIR/add-user.sh"
 cat > "$ADMIN_DIR/revoke-user.sh" << 'EOFCREATE'
 #!/bin/bash
 set -e
-USER="$1"
-[ -z "$USER" ] && { echo "Usage: $0 <username>"; exit 1; }
+USER_NAME="$1"
+[ -z "$USER_NAME" ] && { echo "Usage: $0 <username>"; exit 1; }
 OVPN_DIR="/etc/openvpn/xor"
 cd "$OVPN_DIR/easy-rsa"
-./easyrsa revoke "$USER" > /dev/null 2>&1
-./easyrsa gen-crl > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa revoke "$USER_NAME" > /dev/null 2>&1
+EASYRSA_BATCH=1 ./easyrsa gen-crl > /dev/null 2>&1
 cp pki/crl.pem "$OVPN_DIR/crl.pem"
-pkill -f "$USER" || true
-echo "Client $USER revoked"
+pkill -f "$USER_NAME" || true
+echo "Client $USER_NAME revoked"
 EOFCREATE
 
 chmod +x "$ADMIN_DIR/revoke-user.sh"
