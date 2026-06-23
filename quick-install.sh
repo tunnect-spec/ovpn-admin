@@ -88,7 +88,7 @@ done
 # Apply schema + seed the admin using the worker image (it has prisma + tsx + the repo).
 docker compose -f docker/compose.yml run --rm --no-deps --user root \
   -e SEED_ADMIN_EMAIL="$ADMIN_EMAIL" -e SEED_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
-  worker sh -lc "corepack enable >/dev/null 2>&1; pnpm prisma db push --skip-generate && pnpm exec tsx prisma/seed.ts"
+  worker sh -lc "corepack enable >/dev/null 2>&1; pnpm prisma db push && pnpm exec tsx prisma/seed.ts"
 
 log "[6/6] Waiting for the panel to respond…"
 for i in $(seq 1 45); do

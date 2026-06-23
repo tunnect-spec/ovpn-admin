@@ -117,7 +117,7 @@ docker compose -f docker/compose.yml up -d --build
 # Apply schema + create the admin (uses the worker image, which has prisma + tsx):
 docker compose -f docker/compose.yml run --rm --user root \
   -e SEED_ADMIN_EMAIL=admin@example.com -e SEED_ADMIN_PASSWORD='your-strong-password' \
-  worker sh -lc "corepack enable; pnpm prisma db push --skip-generate && pnpm exec tsx prisma/seed.ts"
+  worker sh -lc "corepack enable; pnpm prisma db push && pnpm exec tsx prisma/seed.ts"
 ```
 
 ### Add a node (one command installs the agent)
