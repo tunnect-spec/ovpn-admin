@@ -457,6 +457,43 @@ export class OpenVpnOps {
   }
 
   /**
+   * Run the OpenVPN XOR installer with the options chosen in the panel
+   * (XOR on/off, DNS mode, domain, MTU/MSSFIX). The installer is idempotent:
+   * on an already-installed node it only regenerates config + restarts (fast,
+   * PKI preserved); on a fresh node it builds from source (several minutes).
+   */
+  async installOpenVpn(payload: any = {}): Promise<{ installed: boolean; version?: string; xorMask?: string }> {
+    const candidates = [
+      '/opt/ovpn-admin-src/install-openvpn-xor.sh',
+      '/opt/ovpn-agent/install-openvpn-xor.sh',
+    ];
+    const installer = candidates.find((p) => existsSync(p));
+    if (!installer) {
+      throw new Error('OpenVPN installer script not found on this node');
+    }
+
+    const env = {
+      ...process.env,
+      SERVER_HOST: payload.serverHost ? String(payload.serverHost) : '',
+      PORT: String(payload.port ?? 443),
+      PROTO: String(payload.protocol ?? 'udp'),
+      USE_XOR: payload.useXor === false ? '0' : '1',
+      DNS_MODE: String(payload.dnsMode ?? 'standard'),
+      CUSTOM_DNS: payload.customDns ? String(payload.customDns) : '',
+      DOMAIN: payload.domain ? String(payload.domain) : '',
+      MTU: String(payload.mtu ?? 1500),
+      MSSFIX: String(payload.mssfix ?? 1360),
+      FIRST_USER: payload.firstUser ? String(payload.firstUser) : 'client1',
+    };
+
+    // Up to 45 min to allow a from-source compile on the first install.
+    await exec('bash', [installer], { env, timeout: 45 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+
+    const info = await this.checkInstallation();
+    return { installed: info.installed, version: info.version, xorMask: info.xorMask };
+  }
+
+  /**
    * Check if OpenVPN is already installed and return installation info
    */
   async checkInstallation(): Promise<{

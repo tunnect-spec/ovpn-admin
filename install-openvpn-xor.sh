@@ -13,8 +13,15 @@ fi
 OPENVPN_VERSION="2.7.3"
 OPENVPN_TAG="v2.7.3"
 
-PORT="443"
-PROTO="udp"
+# Configurable from the panel (passed as env by the agent on NODE_INSTALL).
+PORT="${PORT:-443}"
+PROTO="${PROTO:-udp}"
+USE_XOR="${USE_XOR:-1}"            # 1 = OpenVPN+XOR, 0 = standard (no scramble)
+DNS_MODE="${DNS_MODE:-standard}"  # standard | empty | custom
+CUSTOM_DNS="${CUSTOM_DNS:-}"      # comma-separated, used when DNS_MODE=custom
+MTU="${MTU:-1500}"
+MSSFIX="${MSSFIX:-1360}"
+DOMAIN="${DOMAIN:-}"              # client 'remote' uses this if set, else SERVER_HOST
 VPN_SUBNET="10.8.0.0"
 VPN_NETMASK="255.255.255.0"
 
@@ -55,7 +62,244 @@ if [[ "$FIRST_USER" =~ [^a-zA-Z0-9._-] ]]; then
   exit 1
 fi
 
-XOR_MASK="$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9_-' | head -c 28)"
+REMOTE_HOST="${DOMAIN:-$SERVER_HOST}"
+
+# Preserve the XOR mask across reconfigurations (including toggling XOR off then
+# on) so already-issued client configs keep working. Prefer the persisted
+# config.env, fall back to the running server.conf, else generate a fresh one.
+if [[ -f "$ADMIN_DIR/config.env" ]] && grep -q '^XOR_MASK=' "$ADMIN_DIR/config.env"; then
+  XOR_MASK="$(grep -m1 '^XOR_MASK=' "$ADMIN_DIR/config.env" | cut -d= -f2-)"
+elif [[ -f "$OVPN_DIR/server.conf" ]] && grep -q '^scramble xormask ' "$OVPN_DIR/server.conf"; then
+  XOR_MASK="$(grep -m1 '^scramble xormask ' "$OVPN_DIR/server.conf" | awk '{print $3}')"
+else
+  XOR_MASK="$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9_-' | head -c 28)"
+fi
+
+# --- Config renderers (shared by the fresh-install and reconfigure paths) ---
+render_dns_pushes() {
+  case "$DNS_MODE" in
+    empty) : ;;                                  # push no DNS
+    custom)
+      local old="$IFS"; IFS=','
+      for d in $CUSTOM_DNS; do
+        d="$(echo "$d" | tr -d ' ')"
+        [[ -n "$d" ]] && echo "push \"dhcp-option DNS $d\""
+      done
+      IFS="$old"
+      ;;
+    *)                                           # standard
+      echo 'push "dhcp-option DNS 1.1.1.1"'
+      echo 'push "dhcp-option DNS 8.8.8.8"'
+      ;;
+  esac
+}
+
+install_disconnect_hook() {
+  mkdir -p "$OVPN_DIR/traffic"
+  cat > "$OVPN_DIR/client-disconnect.sh" <<'DISCONNECT'
+#!/usr/bin/env bash
+# OpenVPN calls this on disconnect with $common_name/$bytes_received/$bytes_sent.
+set -eu
+DIR=/etc/openvpn/xor/traffic
+cn="${common_name:-}"
+case "$cn" in *[!a-zA-Z0-9._-]*|'') exit 0 ;; esac
+mkdir -p "$DIR"; f="$DIR/$cn"
+up=0; down=0
+if [ -f "$f" ]; then read -r up down < "$f" 2>/dev/null || { up=0; down=0; }; fi
+echo "$(( ${up:-0} + ${bytes_received:-0} )) $(( ${down:-0} + ${bytes_sent:-0} ))" > "$f"
+exit 0
+DISCONNECT
+  chmod +x "$OVPN_DIR/client-disconnect.sh"
+}
+
+write_server_conf() {
+  {
+    cat <<EOF
+port $PORT
+proto $PROTO
+dev tun
+disable-dco
+
+persist-key
+persist-tun
+
+topology subnet
+server $VPN_SUBNET $VPN_NETMASK
+
+ca $EASYRSA_DIR/pki/ca.crt
+cert $EASYRSA_DIR/pki/issued/server.crt
+key $EASYRSA_DIR/pki/private/server.key
+
+dh none
+tls-groups secp256r1
+
+tls-crypt $OVPN_DIR/tls-crypt.key
+crl-verify $OVPN_DIR/crl.pem
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+
+keepalive 10 120
+tun-mtu $MTU
+mssfix $MSSFIX
+
+push "redirect-gateway def1 bypass-dhcp"
+EOF
+    render_dns_pushes
+    [[ "$USE_XOR" == "1" ]] && echo "scramble xormask $XOR_MASK"
+    cat <<EOF
+
+verb 3
+status /var/log/openvpn-xor-status.log 10
+status-version 2
+log-append /var/log/openvpn-xor.log
+
+script-security 2
+client-disconnect $OVPN_DIR/client-disconnect.sh
+
+explicit-exit-notify 1
+EOF
+  } > "$OVPN_DIR/server.conf"
+}
+
+# Runtime config sourced by add-user.sh when generating client .ovpn files.
+write_config_env() {
+  mkdir -p "$ADMIN_DIR"
+  cat > "$ADMIN_DIR/config.env" <<EOF
+SERVER_HOST=$SERVER_HOST
+CLIENT_REMOTE=$REMOTE_HOST
+PORT=$PORT
+PROTO=$PROTO
+USE_XOR=$USE_XOR
+MTU=$MTU
+MSSFIX=$MSSFIX
+XOR_MASK=$XOR_MASK
+OVPN_DIR=$OVPN_DIR
+EASYRSA_DIR=$EASYRSA_DIR
+CLIENTS_DIR=$CLIENTS_DIR
+OVPN_BIN=$OVPN_BIN
+OVPN_LINK=$OVPN_LINK
+EXPORT_DIR=$EXPORT_DIR
+SFTP_USER=$SFTP_USER
+EOF
+}
+
+write_add_user_script() {
+  mkdir -p "$ADMIN_DIR"
+  cat > "$ADMIN_DIR/add-user.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+USER_NAME="${1:-}"
+
+if [[ -z "$USER_NAME" ]]; then
+  echo "Usage: $0 username"
+  exit 1
+fi
+
+if [[ "$USER_NAME" =~ [^a-zA-Z0-9._-] ]]; then
+  echo "Username may contain only letters, numbers, dot, underscore, hyphen"
+  exit 1
+fi
+
+source /root/ovpn-xor-admin/config.env
+
+# Client scramble line must match the server (omitted when XOR is disabled).
+SCRAMBLE_LINE=""
+if [[ "${USE_XOR:-1}" == "1" ]]; then
+  SCRAMBLE_LINE="scramble xormask $XOR_MASK"
+fi
+
+mkdir -p "$CLIENTS_DIR"
+
+cd "$EASYRSA_DIR"
+
+if [[ -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" ]]; then
+  echo "User already exists: $USER_NAME"
+  exit 1
+fi
+
+EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass
+
+CA="$(cat "$EASYRSA_DIR/pki/ca.crt")"
+CERT="$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$EASYRSA_DIR/pki/issued/$USER_NAME.crt")"
+KEY="$(cat "$EASYRSA_DIR/pki/private/$USER_NAME.key")"
+TLS="$(cat "$OVPN_DIR/tls-crypt.key")"
+
+cat > "$CLIENTS_DIR/$USER_NAME.ovpn" <<EOC
+client
+dev tun
+proto $PROTO
+
+remote $CLIENT_REMOTE $PORT
+
+resolv-retry infinite
+nobind
+
+persist-key
+persist-tun
+
+remote-cert-tls server
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+
+tun-mtu $MTU
+mssfix $MSSFIX
+
+$SCRAMBLE_LINE
+
+verb 3
+
+<ca>
+$CA
+</ca>
+
+<cert>
+$CERT
+</cert>
+
+<key>
+$KEY
+</key>
+
+<tls-crypt>
+$TLS
+</tls-crypt>
+EOC
+
+chmod 600 "$CLIENTS_DIR/$USER_NAME.ovpn"
+
+echo "Created user: $USER_NAME"
+echo "Config: $CLIENTS_DIR/$USER_NAME.ovpn"
+
+if [[ -n "${EXPORT_DIR:-}" && -n "${SFTP_USER:-}" && -d "/home/$SFTP_USER" ]]; then
+  mkdir -p "$EXPORT_DIR"
+  cp "$CLIENTS_DIR/$USER_NAME.ovpn" "$EXPORT_DIR/$USER_NAME.ovpn"
+  chown "$SFTP_USER:$SFTP_USER" "$EXPORT_DIR/$USER_NAME.ovpn"
+  chmod 600 "$EXPORT_DIR/$USER_NAME.ovpn"
+  echo "Exported for SFTP: $EXPORT_DIR/$USER_NAME.ovpn"
+fi
+EOF
+  chmod +x "$ADMIN_DIR/add-user.sh"
+}
+
+# Fast path: if OpenVPN is already installed, just reconfigure from the new
+# options and restart — no recompile, PKI untouched (existing clients keep
+# working). This is what makes changing XOR/DNS/domain/MTU cheap and safe.
+if [[ -x "$OVPN_BIN" && -f "$EASYRSA_DIR/pki/ca.crt" ]]; then
+  echo "=== OpenVPN already installed - reconfiguring only ==="
+  echo "USE_XOR=$USE_XOR DNS_MODE=$DNS_MODE DOMAIN=${DOMAIN:-<server ip>} MTU=$MTU MSSFIX=$MSSFIX"
+  install_disconnect_hook
+  write_server_conf
+  write_config_env
+  write_add_user_script
+  systemctl restart openvpn-xor 2>/dev/null || systemctl start openvpn-xor 2>/dev/null || true
+  echo "OK: reconfigured"
+  exit 0
+fi
 
 echo
 echo "Server host: $SERVER_HOST"
@@ -245,74 +489,9 @@ fi
 echo "OK: binary accepts scramble option"
 rm -f "$OVPN_DIR/parse-test.conf"
 
-echo "=== Write server config ==="
-
-cat > "$OVPN_DIR/server.conf" <<EOF
-port $PORT
-proto $PROTO
-dev tun
-disable-dco
-
-persist-key
-persist-tun
-
-topology subnet
-server $VPN_SUBNET $VPN_NETMASK
-
-ca $EASYRSA_DIR/pki/ca.crt
-cert $EASYRSA_DIR/pki/issued/server.crt
-key $EASYRSA_DIR/pki/private/server.key
-
-dh none
-tls-groups secp256r1
-
-tls-crypt $OVPN_DIR/tls-crypt.key
-crl-verify $OVPN_DIR/crl.pem
-
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-data-ciphers-fallback AES-256-GCM
-auth SHA256
-
-keepalive 10 120
-
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
-push "dhcp-option DNS 8.8.8.8"
-
-scramble xormask $XOR_MASK
-
-verb 3
-status /var/log/openvpn-xor-status.log 10
-status-version 2
-log-append /var/log/openvpn-xor.log
-
-# Per-client cumulative traffic accounting.
-script-security 2
-client-disconnect $OVPN_DIR/client-disconnect.sh
-
-explicit-exit-notify 1
-EOF
-
-echo "=== Install per-client traffic accounting hook ==="
-mkdir -p "$OVPN_DIR/traffic"
-cat > "$OVPN_DIR/client-disconnect.sh" <<'DISCONNECT'
-#!/usr/bin/env bash
-# OpenVPN calls this on client disconnect with $common_name / $bytes_received /
-# $bytes_sent (the session totals). We add them into a per-client file so the
-# agent can report cumulative lifetime traffic to the panel.
-set -eu
-DIR=/etc/openvpn/xor/traffic
-cn="${common_name:-}"
-# Only accept validated client names (also makes the filename safe).
-case "$cn" in *[!a-zA-Z0-9._-]*|'') exit 0 ;; esac
-mkdir -p "$DIR"
-f="$DIR/$cn"
-up=0; down=0
-if [ -f "$f" ]; then read -r up down < "$f" 2>/dev/null || { up=0; down=0; }; fi
-echo "$(( ${up:-0} + ${bytes_received:-0} )) $(( ${down:-0} + ${bytes_sent:-0} ))" > "$f"
-exit 0
-DISCONNECT
-chmod +x "$OVPN_DIR/client-disconnect.sh"
+echo "=== Write server config + traffic hook ==="
+install_disconnect_hook
+write_server_conf
 
 echo "=== Enable IPv4 forwarding ==="
 
@@ -384,113 +563,12 @@ systemctl enable openvpn-xor
 
 echo "=== Write admin config ==="
 
-cat > "$ADMIN_DIR/config.env" <<EOF
-SERVER_HOST=$SERVER_HOST
-PORT=$PORT
-PROTO=$PROTO
-XOR_MASK=$XOR_MASK
-OVPN_DIR=$OVPN_DIR
-EASYRSA_DIR=$EASYRSA_DIR
-CLIENTS_DIR=$CLIENTS_DIR
-OVPN_BIN=$OVPN_BIN
-OVPN_LINK=$OVPN_LINK
-EXPORT_DIR=$EXPORT_DIR
-SFTP_USER=$SFTP_USER
-EOF
-
+write_config_env
 chmod 600 "$ADMIN_DIR/config.env"
 
 echo "=== Create admin scripts ==="
 
-cat > "$ADMIN_DIR/add-user.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-USER_NAME="${1:-}"
-
-if [[ -z "$USER_NAME" ]]; then
-  echo "Usage: $0 username"
-  exit 1
-fi
-
-if [[ "$USER_NAME" =~ [^a-zA-Z0-9._-] ]]; then
-  echo "Username may contain only letters, numbers, dot, underscore, hyphen"
-  exit 1
-fi
-
-source /root/ovpn-xor-admin/config.env
-
-mkdir -p "$CLIENTS_DIR"
-
-cd "$EASYRSA_DIR"
-
-if [[ -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" ]]; then
-  echo "User already exists: $USER_NAME"
-  exit 1
-fi
-
-EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass
-
-CA="$(cat "$EASYRSA_DIR/pki/ca.crt")"
-CERT="$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$EASYRSA_DIR/pki/issued/$USER_NAME.crt")"
-KEY="$(cat "$EASYRSA_DIR/pki/private/$USER_NAME.key")"
-TLS="$(cat "$OVPN_DIR/tls-crypt.key")"
-
-cat > "$CLIENTS_DIR/$USER_NAME.ovpn" <<EOC
-client
-dev tun
-proto $PROTO
-
-remote $SERVER_HOST $PORT
-
-resolv-retry infinite
-nobind
-
-persist-key
-persist-tun
-
-remote-cert-tls server
-
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-data-ciphers-fallback AES-256-GCM
-auth SHA256
-
-scramble xormask $XOR_MASK
-
-verb 3
-
-<ca>
-$CA
-</ca>
-
-<cert>
-$CERT
-</cert>
-
-<key>
-$KEY
-</key>
-
-<tls-crypt>
-$TLS
-</tls-crypt>
-EOC
-
-chmod 600 "$CLIENTS_DIR/$USER_NAME.ovpn"
-
-echo "Created user: $USER_NAME"
-echo "Config: $CLIENTS_DIR/$USER_NAME.ovpn"
-
-if [[ -n "${EXPORT_DIR:-}" && -n "${SFTP_USER:-}" && -d "/home/$SFTP_USER" ]]; then
-  mkdir -p "$EXPORT_DIR"
-  cp "$CLIENTS_DIR/$USER_NAME.ovpn" "$EXPORT_DIR/$USER_NAME.ovpn"
-  chown "$SFTP_USER:$SFTP_USER" "$EXPORT_DIR/$USER_NAME.ovpn"
-  chmod 600 "$EXPORT_DIR/$USER_NAME.ovpn"
-  echo "Exported for SFTP: $EXPORT_DIR/$USER_NAME.ovpn"
-fi
-EOF
-
-chmod +x "$ADMIN_DIR/add-user.sh"
+write_add_user_script
 
 cat > "$ADMIN_DIR/revoke-user.sh" <<'EOF'
 #!/usr/bin/env bash

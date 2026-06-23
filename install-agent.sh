@@ -15,7 +15,10 @@ fi
 AGENT_TOKEN="${AGENT_TOKEN:-}"          # one-time registration token from the panel
 PANEL_URL="${PANEL_URL:-}"
 REPO_URL="${REPO_URL:-https://github.com/tunnect-spec/ovpn-admin.git}"
-INSTALL_OPENVPN="${INSTALL_OPENVPN:-1}"
+# Agent-only by default. OpenVPN is installed from the panel ("Install OpenVPN")
+# with your chosen options (XOR/DNS/domain/MTU). Set INSTALL_OPENVPN=1 to also
+# install OpenVPN right away with defaults.
+INSTALL_OPENVPN="${INSTALL_OPENVPN:-0}"
 NODE_MAJOR="${NODE_MAJOR:-24}"          # Node 24 LTS (override with NODE_MAJOR=...)
 HEARTBEAT_INTERVAL="${AGENT_HEARTBEAT_INTERVAL:-30}"
 AGENT_DIR="/opt/ovpn-agent"
@@ -66,6 +69,10 @@ cat > "$AGENT_DIR/package.json" <<'PKG'
 PKG
 cd "$AGENT_DIR"
 npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1
+
+# Keep the OpenVPN installer next to the agent so the panel-triggered install
+# (NODE_INSTALL) can run it with the chosen options.
+cp "$SRC_DIR/install-openvpn-xor.sh" "$AGENT_DIR/install-openvpn-xor.sh" 2>/dev/null || true
 
 # 5) Register with the panel (exchange the registration token for the API token).
 echo "Registering with panel..."
@@ -124,7 +131,9 @@ systemctl enable --now ovpn-agent >/dev/null 2>&1
 sleep 3
 
 if systemctl is-active --quiet ovpn-agent; then
-  echo "=== Node installed. Agent running (Node $(node -v)). ==="
+  echo "=== Agent installed and running (Node $(node -v)). ==="
+  echo "Next: open the panel and click 'Install OpenVPN' on this node to deploy"
+  echo "OpenVPN with your chosen options (XOR/DNS/domain/MTU)."
   echo "Logs: journalctl -u ovpn-agent -f"
 else
   echo "ERROR: agent failed to start"; journalctl -u ovpn-agent -n 30 --no-pager; exit 1

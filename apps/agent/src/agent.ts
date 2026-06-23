@@ -214,16 +214,10 @@ export class Agent {
 
         case 'NODE_INSTALL':
         case 'node-install':
-          // Check installation status and return real data
-          const installInfo = await this.ops.checkInstallation();
-          result = {
-            installed: installInfo.installed,
-            version: installInfo.version,
-            xorMask: installInfo.xorMask,
-            binaryExists: installInfo.binaryExists,
-            configExists: installInfo.configExists,
-            pkiExists: installInfo.pkiExists,
-          };
+          // Actually install/reconfigure OpenVPN with the options chosen in the
+          // panel (XOR, DNS, domain, MTU). Idempotent: fast reconfigure if
+          // already installed, full build on a fresh node.
+          result = await this.ops.installOpenVpn(job.payload || {});
           break;
 
         default:
