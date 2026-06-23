@@ -93,7 +93,7 @@ if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
     apt-get update -qq
 
     # Install critical build dependencies first (must succeed)
-    apt-get install -y build-essential libssl-dev libpam0g-dev liblz4-dev pkg-config libcap-ng-dev libnl-genl-3-dev liblzo2-dev
+    apt-get install -y build-essential libssl-dev libpam0g-dev liblz4-dev pkg-config libcap-ng-dev libnl-genl-3-dev libnl-3-dev liblzo2-dev autoconf automake libtool
 
     # Install other dependencies (npm may fail, not critical)
     apt-get install -y git wget curl ca-certificates uuid-runtime nodejs npm 2>/dev/null || true
@@ -116,6 +116,12 @@ elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]] || [[ "$OS" == "rocky" ]] 
         openssl-devel \
         pam-devel \
         lz4-devel \
+        libcap-ng-devel \
+        libnl3-devel \
+        lzo-devel \
+        autoconf \
+        automake \
+        libtool \
         git \
         wget \
         curl \
@@ -185,7 +191,7 @@ fi
 # Build OpenVPN XOR
 echo ""
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════════${NC}"
-echo -e "${MAGENTA}  Building OpenVPN 2.5.9 with XOR patch...${NC}"
+echo -e "${MAGENTA}  Building OpenVPN 2.7.3 with luzrain XOR patch...${NC}"
 echo -e "${MAGENTA}════════════════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -194,9 +200,9 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-echo -e "${CYAN}[Step 4/10]${NC} Downloading OpenVPN 2.5.9..."
+echo -e "${CYAN}[Step 4/10]${NC} Downloading OpenVPN 2.7.3..."
 
-OVPN_VERSION="2.5.9"
+OVPN_VERSION="2.7.3"
 
 if [ ! -f "openvpn-${OVPN_VERSION}.tar.gz" ]; then
     wget -q "https://swupdate.openvpn.org/community/releases/openvpn-${OVPN_VERSION}.tar.gz" || {
@@ -212,30 +218,28 @@ echo -e "  ${GREEN}✓ Source ready${NC}"
 
 echo -e "${CYAN}[Step 5.5/10]${NC} Applying XOR patch..."
 
-# Download and apply Tunnelblick XOR patches
-PATCH_BASE="https://raw.githubusercontent.com/Tunnelblick/Tunnelblick/master/third_party/sources/openvpn/openvpn-${OVPN_VERSION}/patches"
-PATCHES=(
-    "02-tunnelblick-openvpn_xorpatch-a.diff"
-    "03-tunnelblick-openvpn_xorpatch-b.diff"
-    "04-tunnelblick-openvpn_xorpatch-c.diff"
-    "05-tunnelblick-openvpn_xorpatch-d.diff"
-    "06-tunnelblick-openvpn_xorpatch-e.diff"
-)
+# Download and apply luzrain XOR patches
+rm -rf /tmp/openvpn-xorpatch
+git clone -q https://github.com/luzrain/openvpn-xorpatch.git /tmp/openvpn-xorpatch
+PATCH_DIR="/tmp/openvpn-xorpatch/patches/v2.7.3"
 
 PATCH_Applied=0
-for patch in "${PATCHES[@]}"; do
-    echo "  Downloading $patch..."
-    if wget -q "$PATCH_BASE/$patch" -O "/tmp/$patch"; then
-        if patch -p1 --dry-run < "/tmp/$patch" > /dev/null 2>&1; then
-            patch -p1 < "/tmp/$patch" && PATCH_Applied=1 && echo "  ✓ Applied $patch"
+if [ -d "$PATCH_DIR" ]; then
+    PATCH_FILES="$(find "$PATCH_DIR" -maxdepth 1 -type f \( -name '*.diff' -o -name '*.patch' \) | sort)"
+    for patch in $PATCH_FILES; do
+        patch_name=$(basename "$patch")
+        echo "  Applying $patch_name..."
+        if patch -p1 --dry-run < "$patch" > /dev/null 2>&1; then
+            patch -p1 < "$patch" > /dev/null 2>&1 && PATCH_Applied=1 && echo "  ✓ Applied $patch_name"
+        elif patch -p0 --dry-run < "$patch" > /dev/null 2>&1; then
+            patch -p0 < "$patch" > /dev/null 2>&1 && PATCH_Applied=1 && echo "  ✓ Applied $patch_name"
         else
-            echo "  ⚠ Patch $patch not compatible, skipping"
+            echo "  ⚠ Patch $patch_name not compatible, skipping"
         fi
-        rm -f "/tmp/$patch"
-    else
-        echo "  ⚠ Failed to download $patch"
-    fi
-done
+    done
+else
+    echo "  ⚠ Patch directory not found"
+fi
 
 if [ "$PATCH_Applied" -eq 0 ]; then
     echo -e "  ${YELLOW}⚠ No XOR patches applied - using standard OpenVPN${NC}"
@@ -246,6 +250,8 @@ else
 fi
 
 echo -e "${CYAN}[Step 6/10]${NC} Configuring OpenVPN..."
+
+autoreconf -i -v -f > /dev/null 2>&1
 
 ./configure \
     --with-crypto-library=openssl \
@@ -351,12 +357,7 @@ cp pki/{ca.crt,crl.pem} "$OVPN_DIR/"
 cp pki/issued/server.crt "$OVPN_DIR/"
 cp pki/private/server.key "$OVPN_DIR/"
 
-# Generate DH and TLS keys
-openssl dhparam -dsaparam -out "$OVPN_DIR/dh.pem" 2048 > /dev/null 2>&1 &
-
-# Wait for DH in background
-wait
-
+# Generate TLS key
 /usr/local/sbin/openvpn --genkey secret "$OVPN_DIR/ta.key" 2>/dev/null
 
 # Generate XOR mask (only if XOR support is enabled)
@@ -379,12 +380,14 @@ fi
 cat > "$OVPN_DIR/server.conf" << EOF
 port 443
 proto udp
-dev tun0
+dev tun
+disable-dco
 
 ca $OVPN_DIR/ca.crt
 cert $OVPN_DIR/server.crt
 key $OVPN_DIR/server.key
-dh $OVPN_DIR/dh.pem
+dh none
+tls-groups secp256r1
 tls-crypt $OVPN_DIR/ta.key
 
 server 10.8.0.0 255.255.255.0
@@ -396,6 +399,7 @@ keepalive 10 120
 cipher AES-256-GCM
 auth SHA256
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
 
 persist-key
 persist-tun
@@ -528,6 +532,7 @@ persist-key
 persist-tun
 remote-cert-tls server
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
 auth SHA256
 ${XOR_LINE}
 verb 3
