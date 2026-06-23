@@ -6,10 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { Shield, Lock, Mail, AlertCircle } from 'lucide-react';
+import { Lock, Mail, AlertCircle } from 'lucide-react';
 
 import { apiFetch, ApiError } from '@/components/use-api';
 import { Spinner } from '@/components/ui/spinner';
+import { Logo } from '@/components/ui/logo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,16 +47,16 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-background relative overflow-hidden">
       {/* Background solid effect handled by bg-background */}
 
-      <Card className="w-full max-w-md glass premium-glow mx-4">
-        <CardHeader className="text-center space-y-2 pb-6">
+      <Card className="w-full max-w-md glass premium-glow mx-4 animate-in">
+        <CardHeader className="text-center space-y-3 pb-6">
           <div className="flex justify-center">
-            <div className="h-16 w-16 rounded-2xl bg-primary flex items-center justify-center premium-glow-sm">
-              <Shield className="h-8 w-8 text-primary-foreground" />
-            </div>
+            <Logo size={78} className="drop-shadow-[0_0_26px_rgba(34,211,238,0.35)]" />
           </div>
-          <CardTitle className="text-2xl font-bold text-primary">OpenVPN Admin</CardTitle>
+          <CardTitle className="text-3xl font-bold tracking-tight">
+            <span className="gradient-text">OVPN</span> <span className="text-foreground">Admin</span>
+          </CardTitle>
           <CardDescription className="text-base">
-            Enter your credentials to access the admin panel
+            Enter your credentials to access the control panel
           </CardDescription>
         </CardHeader>
 

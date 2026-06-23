@@ -9,12 +9,12 @@ import {
   Briefcase,
   FileText,
   LogOut,
-  Shield,
   Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Logo } from "@/components/ui/logo";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -30,11 +30,11 @@ function SidebarInner({ userEmail, onNavigate }: { userEmail?: string; onNavigat
     <div className="flex h-full w-full flex-col">
       {/* Logo */}
       <div className="flex h-16 items-center px-6 border-b border-border/50">
-        <Link href="/dashboard" className="flex items-center gap-2" onClick={onNavigate}>
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary premium-glow-sm">
-            <Shield className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-lg font-semibold text-primary">VPN Admin</span>
+        <Link href="/dashboard" className="flex items-center gap-2.5" onClick={onNavigate}>
+          <Logo size={34} />
+          <span className="text-lg font-semibold tracking-tight">
+            <span className="gradient-text">OVPN</span> <span className="text-foreground">Admin</span>
+          </span>
         </Link>
       </div>
 

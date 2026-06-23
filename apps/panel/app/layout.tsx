@@ -17,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark" style={{ fontFamily: 'var(--font-inter, sans-serif)' }}>
+    <html lang="en" className={`dark ${inter.variable}`}>
       <body className="min-h-screen bg-background text-foreground antialiased">
         {children}
         <Toaster />
