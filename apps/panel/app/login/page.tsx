@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +12,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { Logo } from '@/components/ui/logo';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -31,8 +29,10 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      // The session cookie is set server-side; nothing to read from the body.
-      router.push('/dashboard');
+      // The session cookie is set server-side. Use a hard navigation so the
+      // server re-renders /dashboard with the new cookie (a client router.push
+      // can race the cookie / be a no-op on a cookie-gated server route).
+      window.location.assign('/dashboard');
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -50,7 +50,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md glass premium-glow mx-4 animate-in">
         <CardHeader className="text-center space-y-3 pb-6">
           <div className="flex justify-center">
-            <Logo size={78} className="drop-shadow-[0_0_26px_rgba(34,211,238,0.35)]" />
+            <Logo size={78} />
           </div>
           <CardTitle className="text-3xl font-bold tracking-tight">
             <span className="gradient-text">OVPN</span> <span className="text-foreground">Admin</span>
