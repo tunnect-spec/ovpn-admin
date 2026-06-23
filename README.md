@@ -85,34 +85,42 @@ OpenVPN operations locally, and reports back.
 - A VPN server (or several) running Ubuntu 22.04 / 24.04
 - Node.js 20+ and pnpm 9+ (for local development only)
 
-### 1. Run the panel
+### Option A — one command (recommended)
+
+On a fresh Ubuntu server:
+
+```bash
+curl -fsSL https://github.com/tunnect-spec/ovpn-admin/raw/main/quick-install.sh | sudo bash
+
+# …or with your domain (recommended for production):
+curl -fsSL https://github.com/tunnect-spec/ovpn-admin/raw/main/quick-install.sh | sudo DOMAIN=vpn.example.com bash
+```
+
+It installs Docker, generates secrets, builds and starts everything (Postgres,
+Redis, panel, worker), applies the schema, creates an admin, and **prints the
+panel URL + admin credentials** at the end. Re-running it reuses existing
+secrets. Postgres/Redis stay internal-only; put the panel behind TLS in prod.
+
+### Option B — manual (Docker Compose)
 
 ```bash
 git clone https://github.com/tunnect-spec/ovpn-admin.git
 cd ovpn-admin
 cp .env.example .env
-# Generate strong secrets and fill them in .env:
-#   openssl rand -base64 48   (JWT_SECRET)
-#   openssl rand -hex 16      (ENCRYPTION_KEY)
-#   openssl rand -base64 32   (API_TOKEN_SALT, POSTGRES_PASSWORD)
-# Set NEXT_PUBLIC_APP_URL / PANEL_URL to the panel's public HTTPS URL.
+# Fill .env with strong secrets:
+#   JWT_SECRET=$(openssl rand -base64 48)   ENCRYPTION_KEY=$(openssl rand -hex 16)
+#   API_TOKEN_SALT=$(openssl rand -hex 24)  POSTGRES_PASSWORD=$(openssl rand -hex 24)
+# Set NEXT_PUBLIC_APP_URL / PANEL_URL to the panel's public URL.
 
 docker compose -f docker/compose.yml up -d --build
+
+# Apply schema + create the admin (uses the worker image, which has prisma + tsx):
+docker compose -f docker/compose.yml run --rm --user root \
+  -e SEED_ADMIN_EMAIL=admin@example.com -e SEED_ADMIN_PASSWORD='your-strong-password' \
+  worker sh -lc "corepack enable; pnpm prisma db push --skip-generate && pnpm exec tsx prisma/seed.ts"
 ```
 
-Postgres and Redis are internal-only (not published to the host). Put the panel
-behind a reverse proxy with TLS.
-
-### 2. Create the admin
-
-```bash
-docker exec -e SEED_ADMIN_EMAIL=admin@example.com -e SEED_ADMIN_PASSWORD='your-strong-password' \
-  ovpn-admin-panel node_modules/.bin/tsx prisma/seed.ts
-```
-
-Then sign in at your panel URL with that email/password.
-
-### 3. Add a node (one command installs the agent)
+### Add a node (one command installs the agent)
 
 1. In the panel: **Nodes → Add Node**, enter a name and host.
 2. Copy the install command and run it on your VPS as root:
@@ -124,7 +132,7 @@ Then sign in at your panel URL with that email/password.
    This installs **only the agent** (Node + the agent service). The node then
    appears in the panel.
 
-### 4. Install OpenVPN with your settings
+### Install OpenVPN with your settings
 
 1. Open the node → **Install OpenVPN**.
 2. Choose XOR on/off, DNS mode, **domain**, MTU/MSSFIX.
