@@ -26,7 +26,7 @@ log "=== OpenVPN Admin Panel — Quick Install ==="
 
 # --- Interactive setup: prompt for anything not supplied via env, if a terminal
 #     is available. Otherwise fall back to defaults / a generated password. ---
-if [ -r /dev/tty ]; then
+if { : </dev/tty; } 2>/dev/null; then
   if [[ -z "$DOMAIN" ]]; then
     read -rp "Domain for the panel (blank = http://${SERVER_IP}:3000): " DOMAIN </dev/tty || true
   fi
@@ -98,14 +98,14 @@ EOF
 chmod 600 .env
 
 log "[4/6] Building + starting containers (first run compiles the panel — a few minutes)…"
-docker compose -f docker/compose.yml up -d --build
+docker compose --env-file .env -f docker/compose.yml up -d --build
 
 log "[5/6] Applying database schema + creating the admin…"
 for i in $(seq 1 60); do
-  docker compose -f docker/compose.yml exec -T postgres pg_isready -U ovpn >/dev/null 2>&1 && break
+  docker compose --env-file .env -f docker/compose.yml exec -T postgres pg_isready -U ovpn >/dev/null 2>&1 && break
   sleep 2
 done
-docker compose -f docker/compose.yml run --rm --no-deps --user root \
+docker compose --env-file .env -f docker/compose.yml run --rm --no-deps --user root \
   -e SEED_ADMIN_EMAIL="$ADMIN_EMAIL" -e SEED_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   worker sh -lc "corepack enable >/dev/null 2>&1; pnpm prisma db push && pnpm exec tsx prisma/seed.ts"
 
@@ -124,6 +124,6 @@ echo "Panel:    $PANEL_URL"
 echo "Email:    $ADMIN_EMAIL"
 if [[ "${ADMIN_PASSWORD_GENERATED:-0}" == "1" ]]; then echo "Password: $ADMIN_PASSWORD   (generated — change it after first login)"; else echo "Password: (the one you entered)"; fi
 echo ""
-echo "Logs:     docker compose -f $REPO_DIR/docker/compose.yml logs -f panel"
-echo "Restart:  docker compose -f $REPO_DIR/docker/compose.yml restart"
+echo "Logs:     docker compose --env-file $REPO_DIR/.env -f $REPO_DIR/docker/compose.yml logs -f panel"
+echo "Restart:  docker compose --env-file $REPO_DIR/.env -f $REPO_DIR/docker/compose.yml restart"
 warn "Put the panel behind TLS (a domain + reverse proxy) for production."
