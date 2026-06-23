@@ -17,6 +17,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED 1
 
 RUN corepack enable pnpm
+# Prisma 7 client must be generated before the type-checked Next build, otherwise
+# @prisma/client has no PrismaClient export and the build fails.
+RUN pnpm prisma generate
 RUN pnpm --filter @ovpn/panel build
 
 # Production image, copy all the files and run next
@@ -44,4 +47,5 @@ EXPOSE 3000
 ENV PORT 3000
 ENV HOSTNAME "0.0.0.0"
 
-CMD ["node", "server.js"]
+# Monorepo standalone output places the entrypoint under apps/panel/.
+CMD ["node", "apps/panel/server.js"]

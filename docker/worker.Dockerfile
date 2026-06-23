@@ -8,6 +8,8 @@ RUN corepack enable pnpm && pnpm i --frozen-lockfile
 COPY . .
 
 RUN corepack enable pnpm
+# Generate the Prisma client before building (the worker imports it via @ovpn/db).
+RUN pnpm prisma generate
 RUN pnpm --filter @ovpn/worker build
 
 RUN addgroup --system --gid 1001 nodejs
