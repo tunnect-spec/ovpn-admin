@@ -5,10 +5,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ovpn
-      POSTGRES_PASSWORD: ovpn_dev_password_change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ovpn_admin
-    ports:
-      - "5432:5432"
+    # Not published to the host by default — the panel/worker reach it over the
+    # internal compose network. Uncomment only if you need external DB access.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +23,7 @@ services:
     image: redis:7-alpine
     container_name: ovpn-admin-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # Internal-only (not published to the host) — reached over the compose network.
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -41,10 +42,15 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgresql://ovpn:ovpn_dev_password_change_me@postgres:5432/ovpn_admin
+      DATABASE_URL: postgresql://ovpn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/ovpn_admin
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: change_me_in_production_use_openssl_rand_base64_32
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      # Secrets MUST come from .env (compose auto-loads ./.env). No weak defaults
+      # are baked in — the panel refuses to start in production without strong ones.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env (openssl rand -base64 48)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in .env}
+      API_TOKEN_SALT: ${API_TOKEN_SALT:?set API_TOKEN_SALT in .env}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      PANEL_URL: ${PANEL_URL:-http://localhost:3000}
       NODE_ENV: production
     depends_on:
       postgres:
@@ -59,7 +65,7 @@ services:
     container_name: ovpn-admin-worker
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://ovpn:ovpn_dev_password_change_me@postgres:5432/ovpn_admin
+      DATABASE_URL: postgresql://ovpn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/ovpn_admin
       REDIS_URL: redis://redis:6379
       NODE_ENV: production
     depends_on:

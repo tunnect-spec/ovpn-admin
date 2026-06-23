@@ -30,10 +30,11 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       },
     });
 
-    // Invalidate existing registration tokens for this node
-    await prisma.nodeAuthToken.updateMany({
-      where: { nodeId: id, usedAt: null },
-      data: { usedAt: new Date() },
+    // Remove any existing registration token for this node. NodeAuthToken.nodeId
+    // is unique, so the fresh create() below would otherwise hit a unique
+    // constraint violation (this is what broke the migration flow).
+    await prisma.nodeAuthToken.deleteMany({
+      where: { nodeId: id },
     });
 
     // Generate a fresh registration token
