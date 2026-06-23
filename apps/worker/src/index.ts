@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { prisma } from '@ovpn/db';
+import { prisma } from './prisma';
 
 /**
  * Maintenance worker.
