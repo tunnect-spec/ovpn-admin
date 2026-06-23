@@ -106,15 +106,35 @@ NODE_ENV=production
 EOF
 chmod 600 .env
 
-log "[4/6] Building + starting containers (first run compiles the panel — a few minutes)…"
-docker compose --env-file .env -f docker/compose.yml up -d --build
+log "[4/6] Building images (first run compiles the panel — a few minutes)…"
+docker compose --env-file .env -f docker/compose.yml build
 
-log "[5/6] Applying database schema + creating the admin…"
+# Pick networking: use Docker's bridge if it actually works, otherwise host
+# networking. Some VPS providers filter the Docker bridge (anti-abuse nftables),
+# so containers can't reach each other — host networking sidesteps that.
+bridge_ok() {
+  docker network rm _ovc >/dev/null 2>&1; docker network create _ovc >/dev/null 2>&1 || return 1
+  docker rm -f _ovs >/dev/null 2>&1
+  docker run -d --name _ovs --network _ovc nginx:alpine >/dev/null 2>&1; sleep 3
+  local c; c=$(docker run --rm --network _ovc curlimages/curl:latest -s -o /dev/null -w '%{http_code}' -m 6 http://_ovs 2>/dev/null || echo 000)
+  docker rm -f _ovs >/dev/null 2>&1; docker network rm _ovc >/dev/null 2>&1
+  [[ "$c" == "200" ]]
+}
+CF="-f docker/compose.yml"; CFA="-f $REPO_DIR/docker/compose.yml"
+if bridge_ok; then
+  echo "Docker bridge networking: OK"
+else
+  warn "Docker bridge networking is filtered on this host — using host networking."
+  CF="$CF -f docker/compose.host.yml"; CFA="$CFA -f $REPO_DIR/docker/compose.host.yml"
+fi
+
+log "[5/6] Starting containers + applying schema + admin…"
+docker compose --env-file .env $CF up -d
 for i in $(seq 1 60); do
-  docker compose --env-file .env -f docker/compose.yml exec -T postgres pg_isready -U ovpn >/dev/null 2>&1 && break
+  docker compose --env-file .env $CF exec -T postgres pg_isready -U ovpn >/dev/null 2>&1 && break
   sleep 2
 done
-docker compose --env-file .env -f docker/compose.yml run --rm --no-deps --user root \
+docker compose --env-file .env $CF run --rm --no-deps --user root \
   -e SEED_ADMIN_EMAIL="$ADMIN_EMAIL" -e SEED_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
   worker sh -lc "corepack enable >/dev/null 2>&1; pnpm prisma db push && pnpm exec tsx prisma/seed.ts"
 
@@ -133,6 +153,6 @@ echo "Panel:    $PANEL_URL"
 echo "Email:    $ADMIN_EMAIL"
 if [[ "${ADMIN_PASSWORD_GENERATED:-0}" == "1" ]]; then echo "Password: $ADMIN_PASSWORD   (generated — change it after first login)"; else echo "Password: (the one you entered)"; fi
 echo ""
-echo "Logs:     docker compose --env-file $REPO_DIR/.env -f $REPO_DIR/docker/compose.yml logs -f panel"
-echo "Restart:  docker compose --env-file $REPO_DIR/.env -f $REPO_DIR/docker/compose.yml restart"
+echo "Logs:     docker compose --env-file $REPO_DIR/.env $CFA logs -f panel"
+echo "Restart:  docker compose --env-file $REPO_DIR/.env $CFA restart"
 warn "Put the panel behind TLS (a domain + reverse proxy) for production."

@@ -37,6 +37,9 @@ services:
     build:
       context: ..
       dockerfile: docker/panel.Dockerfile
+      # Build over the host network so package downloads work even on hosts where
+      # the Docker bridge is filtered (some VPS providers do this).
+      network: host
     container_name: ovpn-admin-panel
     restart: unless-stopped
     ports:
@@ -62,6 +65,7 @@ services:
     build:
       context: ..
       dockerfile: docker/worker.Dockerfile
+      network: host
     container_name: ovpn-admin-worker
     restart: unless-stopped
     environment:

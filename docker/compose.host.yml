@@ -1,0 +1,31 @@
+# Host-networking override.
+#
+# Use this on hosts where Docker's bridge networking doesn't work (e.g. some VPS
+# providers apply anti-abuse nftables filters at the bridge/L2 level, so
+# containers can't reach each other or the internet over the bridge). All
+# services share the host network namespace and talk over 127.0.0.1.
+#
+#   docker compose -f docker/compose.yml -f docker/compose.host.yml up -d
+#
+# Postgres/Redis bind to 127.0.0.1 only, so they are NOT exposed externally.
+services:
+  postgres:
+    network_mode: host
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+
+  redis:
+    network_mode: host
+    command: ["redis-server", "--appendonly", "yes", "--bind", "127.0.0.1"]
+
+  panel:
+    network_mode: host
+    ports: !override []
+    environment:
+      DATABASE_URL: postgresql://ovpn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@127.0.0.1:5432/ovpn_admin
+      REDIS_URL: redis://127.0.0.1:6379
+
+  worker:
+    network_mode: host
+    environment:
+      DATABASE_URL: postgresql://ovpn:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@127.0.0.1:5432/ovpn_admin
+      REDIS_URL: redis://127.0.0.1:6379
