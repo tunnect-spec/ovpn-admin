@@ -69,6 +69,15 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 docker compose version >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq docker-compose-plugin; }
 
+# Docker build/runtime must resolve DNS even on hosts with broken IPv6 egress
+# (otherwise 'pnpm i' fails with EAI_AGAIN registry.npmjs.org). Pin IPv4 resolvers.
+if [[ ! -f /etc/docker/daemon.json ]]; then
+  mkdir -p /etc/docker
+  printf '{ "dns": ["1.1.1.1", "8.8.8.8"] }\n' > /etc/docker/daemon.json
+  systemctl restart docker 2>/dev/null || service docker restart 2>/dev/null || true
+  sleep 4
+fi
+
 log "[2/6] Fetching source…"
 if [[ -d "$REPO_DIR/.git" ]]; then
   git -C "$REPO_DIR" fetch --depth 1 origin main && git -C "$REPO_DIR" reset --hard origin/main
