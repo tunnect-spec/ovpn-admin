@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import path from 'path';
 
 const exec = promisify(execFile);
@@ -484,6 +484,9 @@ export class OpenVpnOps {
       MTU: String(payload.mtu ?? 1500),
       MSSFIX: String(payload.mssfix ?? 1360),
       FIRST_USER: payload.firstUser ? String(payload.firstUser) : 'client1',
+      // When a PKI backup was restored, the installer keeps the CA/certs/mask
+      // instead of generating a fresh PKI (seamless migration).
+      RESTORE: payload.restore ? '1' : '0',
     };
 
     // Up to 45 min to allow a from-source compile on the first install.
@@ -491,6 +494,42 @@ export class OpenVpnOps {
 
     const info = await this.checkInstallation();
     return { installed: info.installed, version: info.version, xorMask: info.xorMask };
+  }
+
+  /**
+   * Create a PKI/state backup (gzipped tar of the OpenVPN + admin dirs) as a
+   * Buffer, to be uploaded to the panel. Contains the CA, all client certs/keys,
+   * CRL, tls-crypt key, XOR mask and admin scripts — everything needed to bring
+   * an identical node up on a new server.
+   */
+  async createBackup(): Promise<Buffer> {
+    const targets: string[] = [];
+    if (existsSync(OVPN_DIR)) targets.push(OVPN_DIR);
+    if (existsSync(ADMIN_DIR)) targets.push(ADMIN_DIR);
+    if (targets.length === 0) {
+      throw new Error('Nothing to back up (OpenVPN not installed yet)');
+    }
+    // Absolute paths -> tar with -P so they restore to the same locations.
+    const { stdout } = await exec('tar', ['-czf', '-', '-P', ...targets], {
+      encoding: 'buffer',
+      maxBuffer: 256 * 1024 * 1024,
+    } as any);
+    return stdout as unknown as Buffer;
+  }
+
+  /**
+   * Restore a PKI/state backup produced by createBackup() onto this host
+   * (extracts to the original absolute paths). Used during migration before the
+   * installer runs, so the new server keeps the same CA/certs.
+   */
+  async restorePki(data: Buffer): Promise<void> {
+    const tmp = '/tmp/ovpn-pki-restore.tar.gz';
+    writeFileSync(tmp, data);
+    try {
+      await exec('tar', ['-xzf', tmp, '-P', '-C', '/'], { maxBuffer: 16 * 1024 * 1024 });
+    } finally {
+      try { unlinkSync(tmp); } catch { /* ignore */ }
+    }
   }
 
   /**

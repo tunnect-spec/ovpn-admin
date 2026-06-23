@@ -200,11 +200,13 @@ export class Agent {
         case 'CLIENT_CREATE':
         case 'client-create':
           result = await this.ops.createClient(job.payload?.clientName || job.payload?.name);
+          await this.uploadBackup(); // PKI changed -> refresh the panel backup
           break;
 
         case 'CLIENT_REVOKE':
         case 'client-revoke':
           result = await this.ops.revokeClient(job.payload?.clientName || job.payload?.name);
+          await this.uploadBackup(); // CRL changed -> refresh the panel backup
           break;
 
         case 'NODE_SYNC':
@@ -214,10 +216,20 @@ export class Agent {
 
         case 'NODE_INSTALL':
         case 'node-install':
-          // Actually install/reconfigure OpenVPN with the options chosen in the
-          // panel (XOR, DNS, domain, MTU). Idempotent: fast reconfigure if
-          // already installed, full build on a fresh node.
+          // Seamless migration: if the panel has a PKI backup for this node,
+          // restore it BEFORE installing so the new server keeps the same CA,
+          // client certs, CRL and XOR mask (existing .ovpn files keep working).
+          if (job.payload?.restore) {
+            const backup = await this.downloadBackup();
+            if (backup) {
+              await this.ops.restorePki(backup);
+              console.log('  ↺ Restored PKI from panel backup');
+            }
+          }
+          // Idempotent: fast reconfigure if already installed, full build on a
+          // fresh node (keeps restored PKI). Applies XOR/DNS/domain/MTU options.
           result = await this.ops.installOpenVpn(job.payload || {});
+          await this.uploadBackup(); // capture the freshly-installed PKI on the panel
           break;
 
         default:
@@ -232,6 +244,39 @@ export class Agent {
       console.error(`  ✗ Job ${job.id} failed:`, error.message);
       // Report job failure to panel
       await this.reportJobCompletion(job.id, false, null, error.message);
+    }
+  }
+
+  /** Upload the current PKI/state to the panel (enables seamless migration). */
+  private async uploadBackup(): Promise<void> {
+    try {
+      const buf = await this.ops.createBackup();
+      await this.api.post('/api/agent/backup', buf, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+      console.log(`  ✓ PKI backup uploaded to panel (${buf.length} bytes)`);
+    } catch (err: any) {
+      console.warn('  ⚠ PKI backup upload failed:', err?.message ?? err);
+    }
+  }
+
+  /** Download this node's PKI backup from the panel, or null if none exists. */
+  private async downloadBackup(): Promise<Buffer | null> {
+    try {
+      const res = await this.api.get('/api/agent/backup', {
+        responseType: 'arraybuffer',
+        maxContentLength: Infinity,
+      });
+      return Buffer.from(res.data);
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        console.log('  (no PKI backup stored on the panel)');
+        return null;
+      }
+      console.warn('  ⚠ PKI backup download failed:', err?.message ?? err);
+      return null;
     }
   }
 

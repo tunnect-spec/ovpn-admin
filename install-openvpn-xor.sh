@@ -22,6 +22,7 @@ CUSTOM_DNS="${CUSTOM_DNS:-}"      # comma-separated, used when DNS_MODE=custom
 MTU="${MTU:-1500}"
 MSSFIX="${MSSFIX:-1360}"
 DOMAIN="${DOMAIN:-}"              # client 'remote' uses this if set, else SERVER_HOST
+RESTORE="${RESTORE:-0}"          # 1 = a PKI backup was restored; keep it, don't regenerate
 VPN_SUBNET="10.8.0.0"
 VPN_NETMASK="255.255.255.0"
 
@@ -330,14 +331,18 @@ echo "=== Backup old installation if exists ==="
 
 BACKUP_SUFFIX="$(date +%F-%H%M%S)"
 
-if [[ -d "$OVPN_DIR" ]]; then
-  mv "$OVPN_DIR" "$OVPN_DIR.backup.$BACKUP_SUFFIX"
-  echo "Backed up old $OVPN_DIR"
-fi
+if [[ "$RESTORE" == "1" ]]; then
+  echo "RESTORE=1 — preserving restored PKI in $OVPN_DIR / $ADMIN_DIR (not moving aside)."
+else
+  if [[ -d "$OVPN_DIR" ]]; then
+    mv "$OVPN_DIR" "$OVPN_DIR.backup.$BACKUP_SUFFIX"
+    echo "Backed up old $OVPN_DIR"
+  fi
 
-if [[ -d "$ADMIN_DIR" ]]; then
-  mv "$ADMIN_DIR" "$ADMIN_DIR.backup.$BACKUP_SUFFIX"
-  echo "Backed up old $ADMIN_DIR"
+  if [[ -d "$ADMIN_DIR" ]]; then
+    mv "$ADMIN_DIR" "$ADMIN_DIR.backup.$BACKUP_SUFFIX"
+    echo "Backed up old $ADMIN_DIR"
+  fi
 fi
 
 rm -rf "$OVPN_PREFIX"
@@ -450,21 +455,33 @@ mkdir -p "$CLIENTS_DIR"
 
 echo "=== Setup EasyRSA ==="
 
-make-cadir "$EASYRSA_DIR"
-cd "$EASYRSA_DIR"
+if [[ -f "$EASYRSA_DIR/pki/ca.crt" ]]; then
+  echo "Existing CA found (restored from backup) — keeping CA + client certs, skipping PKI generation."
+  cd "$EASYRSA_DIR"
+  [[ -f "$EASYRSA_DIR/pki/crl.pem" ]] || EASYRSA_BATCH=1 ./easyrsa gen-crl || true
+  cp -f "$EASYRSA_DIR/pki/crl.pem" "$OVPN_DIR/crl.pem" 2>/dev/null || true
+  chmod 644 "$OVPN_DIR/crl.pem" 2>/dev/null || true
+else
+  make-cadir "$EASYRSA_DIR"
+  cd "$EASYRSA_DIR"
 
-./easyrsa init-pki
-EASYRSA_BATCH=1 ./easyrsa build-ca nopass
-EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass
-./easyrsa gen-crl
+  ./easyrsa init-pki
+  EASYRSA_BATCH=1 ./easyrsa build-ca nopass
+  EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass
+  ./easyrsa gen-crl
 
-cp "$EASYRSA_DIR/pki/crl.pem" "$OVPN_DIR/crl.pem"
-chmod 644 "$OVPN_DIR/crl.pem"
+  cp "$EASYRSA_DIR/pki/crl.pem" "$OVPN_DIR/crl.pem"
+  chmod 644 "$OVPN_DIR/crl.pem"
+fi
 
 echo "=== Generate tls-crypt key ==="
 
-"$OVPN_LINK" --genkey secret "$OVPN_DIR/tls-crypt.key"
-chmod 600 "$OVPN_DIR/tls-crypt.key"
+if [[ -f "$OVPN_DIR/tls-crypt.key" ]]; then
+  echo "tls-crypt key present (restored) — keeping it."
+else
+  "$OVPN_LINK" --genkey secret "$OVPN_DIR/tls-crypt.key"
+  chmod 600 "$OVPN_DIR/tls-crypt.key"
+fi
 
 echo "=== Write parse-test config ==="
 
