@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # OpenVPN Admin Panel - Complete Node Installation Script
-# Version: 3.1.3 - Using OpenVPN 2.5.9 with working XOR patches
+# Version: 3.1.3 - Using OpenVPN 2.7.3 with working luzrain XOR patches
 # =============================================================================
 
 set -e
@@ -28,7 +28,7 @@ if [[ -z "$REGISTRATION_TOKEN" ]]; then
     echo -e "${RED}✗ Error: AGENT_TOKEN is required${NC}"
     echo ""
     echo "This script installs:"
-    echo "  1. OpenVPN 2.5.9 with XOR patch"
+    echo "  1. OpenVPN 2.7.3 with luzrain XOR patch"
     echo "  2. OpenVPN Admin Agent"
     echo "  3. All required dependencies"
     echo ""
@@ -52,7 +52,7 @@ echo "║     OpenVPN XOR - Complete Node Installation                     ║"
 echo "║                    Version ${AGENT_VERSION}                               ║"
 echo "║                                                                  ║"
 echo "║  This will install:                                              ║"
-echo "║    • OpenVPN 2.5.9 with XOR patch                                ║"
+echo "║    • OpenVPN 2.7.3 with luzrain XOR patch                        ║"
 echo "║    • easy-rsa PKI infrastructure                                 ║"
 echo "║    • Admin Agent for panel communication                         ║"
 echo "║    • Systemd services                                           ║"
