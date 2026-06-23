@@ -1,392 +1,421 @@
-#!/bin/bash
-# =============================================================================
-# OpenVPN 2.7.3 with XOR Patch - Installation Script
-# For Ubuntu 22.04/24.04, Debian 11/12
-# =============================================================================
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -e
+# OpenVPN XOR v2.7.3 final installer
+# Ubuntu 22.04 / 24.04
+# Source: OpenVPN 2.7.3 + luzrain/openvpn-xorpatch patches/v2.7.3
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-# Configuration
-OVPN_VERSION="2.7.3"
-OPENVPN_DIR="/etc/openvpn"
-XOR_DIR="${OPENVPN_DIR}/xor"
-ADMIN_DIR="/root/ovpn-xor-admin"
-BUILD_DIR="/tmp/openvpn-build"
-SERVER_IP="$(curl -s -4 ifconfig.me || curl -s -4 icanhazip.com || echo '127.0.0.1')"
-
-echo -e "${CYAN}"
-echo "╔════════════════════════════════════════════════════════════╗"
-echo "║                                                              ║"
-echo "║        OpenVPN 2.7.3 with XOR Patch - Installation          ║"
-echo "║                                                              ║"
-echo "╚════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
-echo ""
-echo "Server IP: ${GREEN}${SERVER_IP}${NC}"
-echo "OpenVPN: ${GREEN}${OVPN_VERSION}${NC}"
-echo ""
-
-# Check root
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${RED}✗ Run as root${NC}"
-   exit 1
+  echo "Run as root: sudo bash $0"
+  exit 1
 fi
 
-# Detect OS
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
-    OS_VERSION=$VERSION_ID
-else
-    echo -e "${RED}✗ Cannot detect OS${NC}"
+OPENVPN_VERSION="2.7.3"
+OPENVPN_TAG="v2.7.3"
+
+PORT="443"
+PROTO="udp"
+VPN_SUBNET="10.8.0.0"
+VPN_NETMASK="255.255.255.0"
+
+BUILD_ROOT="/usr/local/src/openvpn-xor-v273-build"
+PATCH_REPO="$BUILD_ROOT/openvpn-xorpatch"
+SRC_DIR="$BUILD_ROOT/openvpn-$OPENVPN_VERSION"
+
+OVPN_PREFIX="/usr/local/openvpn-xor"
+OVPN_BIN="$OVPN_PREFIX/sbin/openvpn"
+OVPN_LINK="/usr/local/sbin/openvpn-xor"
+
+OVPN_DIR="/etc/openvpn/xor"
+EASYRSA_DIR="$OVPN_DIR/easy-rsa"
+ADMIN_DIR="/root/ovpn-xor-admin"
+CLIENTS_DIR="$ADMIN_DIR/clients"
+
+SFTP_USER="ubuntu"
+EXPORT_DIR="/home/$SFTP_USER/ovpn-clients"
+
+echo "=== OpenVPN XOR v2.7.3 Final Installer ==="
+echo
+
+SERVER_HOST="${SERVER_HOST:-$(curl -4 -fsSL --max-time 10 https://ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')}"
+FIRST_USER="${FIRST_USER:-client1}"
+
+if [[ -z "$SERVER_HOST" ]]; then
+  echo "ERROR: server host is empty"
+  exit 1
+fi
+
+if [[ -z "$FIRST_USER" ]]; then
+  echo "ERROR: first client name is empty"
+  exit 1
+fi
+
+if [[ "$FIRST_USER" =~ [^a-zA-Z0-9._-] ]]; then
+  echo "ERROR: client name may contain only letters, numbers, dot, underscore, hyphen"
+  exit 1
+fi
+
+XOR_MASK="$(openssl rand -base64 64 | tr -dc 'A-Za-z0-9_-' | head -c 28)"
+
+echo
+echo "Server host: $SERVER_HOST"
+echo "First user: $FIRST_USER"
+echo "Protocol: $PROTO"
+echo "Port: $PORT"
+echo "XOR mask: $XOR_MASK"
+echo
+
+sleep 2
+
+echo "=== Stop old service ==="
+systemctl stop openvpn-xor 2>/dev/null || true
+systemctl reset-failed openvpn-xor 2>/dev/null || true
+
+echo "=== Install dependencies ==="
+
+apt update
+DEBIAN_FRONTEND=noninteractive apt install -y \
+  git curl wget ca-certificates \
+  build-essential autoconf automake libtool pkg-config patch \
+  libssl-dev liblzo2-dev liblz4-dev libpam0g-dev libcap-ng-dev \
+  libnl-3-dev libnl-genl-3-dev \
+  easy-rsa iptables-persistent netfilter-persistent \
+  openssl tar gzip nano iproute2 binutils dnsutils
+
+echo "=== Backup old installation if exists ==="
+
+BACKUP_SUFFIX="$(date +%F-%H%M%S)"
+
+if [[ -d "$OVPN_DIR" ]]; then
+  mv "$OVPN_DIR" "$OVPN_DIR.backup.$BACKUP_SUFFIX"
+  echo "Backed up old $OVPN_DIR"
+fi
+
+if [[ -d "$ADMIN_DIR" ]]; then
+  mv "$ADMIN_DIR" "$ADMIN_DIR.backup.$BACKUP_SUFFIX"
+  echo "Backed up old $ADMIN_DIR"
+fi
+
+rm -rf "$OVPN_PREFIX"
+rm -f "$OVPN_LINK"
+
+echo "=== Clean build directory ==="
+
+rm -rf "$BUILD_ROOT"
+mkdir -p "$BUILD_ROOT"
+cd "$BUILD_ROOT"
+
+echo "=== Download OpenVPN $OPENVPN_VERSION source ==="
+
+wget -O "openvpn-$OPENVPN_VERSION.tar.gz" \
+  "https://swupdate.openvpn.org/community/releases/openvpn-$OPENVPN_VERSION.tar.gz"
+
+tar -xzf "openvpn-$OPENVPN_VERSION.tar.gz"
+
+if [[ ! -f "$SRC_DIR/configure.ac" ]]; then
+  echo "ERROR: configure.ac not found in $SRC_DIR"
+  exit 1
+fi
+
+echo "=== Clone XOR patch repo ==="
+
+git clone https://github.com/luzrain/openvpn-xorpatch.git "$PATCH_REPO"
+
+PATCH_DIR="$PATCH_REPO/patches/$OPENVPN_TAG"
+
+if [[ ! -d "$PATCH_DIR" ]]; then
+  echo "ERROR: patch directory not found: $PATCH_DIR"
+  echo "Available patch directories:"
+  find "$PATCH_REPO/patches" -maxdepth 1 -type d | sort
+  exit 1
+fi
+
+PATCH_FILES="$(find "$PATCH_DIR" -maxdepth 1 -type f \( -name '*.diff' -o -name '*.patch' \) | sort)"
+PATCH_COUNT="$(echo "$PATCH_FILES" | sed '/^$/d' | wc -l)"
+
+echo "=== Patch files ==="
+echo "$PATCH_FILES"
+
+if [[ "$PATCH_COUNT" -ne 5 ]]; then
+  echo "ERROR: expected exactly 5 patch files for v2.7.3, found $PATCH_COUNT"
+  exit 1
+fi
+
+echo "=== Apply XOR patches ==="
+
+cd "$SRC_DIR"
+
+for p in $PATCH_FILES; do
+  echo "Applying patch: $p"
+
+  if patch --dry-run -p1 < "$p" >/tmp/openvpn-xor-patch-test.log 2>&1; then
+    patch -p1 < "$p"
+    echo "Applied with -p1"
+  elif patch --dry-run -p0 < "$p" >/tmp/openvpn-xor-patch-test.log 2>&1; then
+    patch -p0 < "$p"
+    echo "Applied with -p0"
+  else
+    echo "ERROR: failed to apply patch: $p"
+    cat /tmp/openvpn-xor-patch-test.log || true
     exit 1
+  fi
+done
+
+echo "=== Verify patched source ==="
+
+grep -R "xormethod" -n src/openvpn >/dev/null || {
+  echo "ERROR: xormethod not found after patch"
+  exit 1
+}
+
+grep -R "xormask" -n src/openvpn >/dev/null || {
+  echo "ERROR: xormask not found after patch"
+  exit 1
+}
+
+grep -R "scramble" -n src/openvpn >/dev/null || {
+  echo "ERROR: scramble not found after patch"
+  exit 1
+}
+
+echo "OK: patched source contains XOR/scramble code"
+
+echo "=== Build OpenVPN XOR ==="
+
+autoreconf -i -v -f
+./configure --prefix="$OVPN_PREFIX"
+make clean || true
+make -j"$(nproc)"
+make install
+
+if [[ ! -x "$OVPN_BIN" ]]; then
+  echo "ERROR: OpenVPN binary not found: $OVPN_BIN"
+  exit 1
 fi
 
-echo -e "${YELLOW}[1/10] OS: ${OS} ${OS_VERSION}${NC}"
+ln -sf "$OVPN_BIN" "$OVPN_LINK"
 
-# Install dependencies
-echo -e "${YELLOW}[2/10] Installing build dependencies...${NC}"
+echo "=== Binary version ==="
+"$OVPN_LINK" --version | head -20
 
-if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
+echo "=== Prepare directories ==="
 
-    apt-get install -y \
-        build-essential \
-        libssl-dev \
-        libpam0g-dev \
-        liblz4-dev \
-        git \
-        wget \
-        curl \
-        iptables \
-        ca-certificates \
-        uuid-runtime 2>/dev/null
-elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]] || [[ "$OS" == "rocky" ]] || [[ "$OS" == "almalinux" ]]; then
-    yum install -y \
-        gcc \
-        make \
-        openssl-devel \
-        pam-devel \
-        lz4-devel \
-        git \
-        wget \
-        curl \
-        iptables \
-        ca-certificates \
-        util-linux 2>/dev/null
-else
-    echo -e "${RED}✗ Unsupported OS${NC}"
-    exit 1
-fi
+mkdir -p "$OVPN_DIR"
+mkdir -p "$ADMIN_DIR"
+mkdir -p "$CLIENTS_DIR"
 
-echo -e "${GREEN}  ✓ Dependencies installed${NC}"
+echo "=== Setup EasyRSA ==="
 
-# Create build directory
-echo -e "${YELLOW}[3/10] Preparing build directory...${NC}"
+make-cadir "$EASYRSA_DIR"
+cd "$EASYRSA_DIR"
 
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
+./easyrsa init-pki
+EASYRSA_BATCH=1 ./easyrsa build-ca nopass
+EASYRSA_BATCH=1 ./easyrsa build-server-full server nopass
+./easyrsa gen-crl
 
-# Download OpenVPN source
-echo -e "${YELLOW}[4/10] Downloading OpenVPN ${OVPN_VERSION}...${NC}"
+cp "$EASYRSA_DIR/pki/crl.pem" "$OVPN_DIR/crl.pem"
+chmod 644 "$OVPN_DIR/crl.pem"
 
-if [ ! -f "openvpn-${OVPN_VERSION}.tar.gz" ]; then
-    wget -q "https://swupdate.openvpn.org/community/releases/openvpn-${OVPN_VERSION}.tar.gz" || {
-        echo -e "${RED}✗ Download failed${NC}"
-        exit 1
-    }
-fi
+echo "=== Generate tls-crypt key ==="
 
-tar -xzf "openvpn-${OVPN_VERSION}.tar.gz"
-cd "openvpn-${OVPN_VERSION}"
+"$OVPN_LINK" --genkey secret "$OVPN_DIR/tls-crypt.key"
+chmod 600 "$OVPN_DIR/tls-crypt.key"
 
-echo -e "${GREEN}  ✓ Source extracted${NC}"
+echo "=== Write parse-test config ==="
 
-# Download and apply XOR patch
-echo -e "${YELLOW}[5/10] Applying XOR patch...${NC}"
-
-# Create the XOR patch file
-cat > xor.patch << 'EOF'
---- a/src/crypto.c
-+++ b/src/crypto.c
-@@ -1007,6 +1007,9 @@
-     const char *message;
-     const char *component;
-     const char *phrase;
-     const char *engine;
-     const char *extra;
-     enum crypto_msg_type type;
- };
-@@ -2327,6 +2330,21 @@
-     return false;
- }
-
-+/* XOR Scramble Support */
-+static int xor_scramble_enabled = 0;
-+static unsigned char xor_key[16];
-+static int xor_key_len = 0;
-+
-+static void xor_scramble_buffers(const uint8_t *src, uint8_t *dst, int len)
-+{
-+    for (int i = 0; i < len; i++) {
-+        dst[i] = src[i] ^ xor_key[i % xor_key_len];
-+    }
-+}
-+
-+static void init_xor_scramble(const char *xormask)
-+{
-+    if (!xormask) {
-+        xor_scramble_enabled = 0;
-+        return;
-+    }
-+
-+    /* Convert hex mask to bytes */
-+    const char *p = xormask;
-+    xor_key_len = 0;
-+    while (*p && xor_key_len < 16) {
-+        if (isxdigit(*p)) {
-+            char hex[3] = {p[0], p[1], 0};
-+            xor_key[xor_key_len++] = strtol(hex, NULL, 16);
-+            if (p[1]) p++;
-+        }
-+        p++;
-+    }
-+
-+    if (xor_key_len > 0) {
-+        xor_scramble_enabled = 1;
-+        msg(M_INFO, "XOR Scramble enabled with key length %d", xor_key_len);
-+    }
-+}
-+
- #include "crypto_openssl.h"
- #include "crypto_mbedtls.h"
-
+cat > "$OVPN_DIR/parse-test.conf" <<EOF
+dev null
+ifconfig-noexec
+route-noexec
+verb 4
+scramble xormask testmask123
 EOF
 
-# Apply patch (simplified - just indicate support)
-echo -e "${GREEN}  ✓ XOR patch prepared${NC}"
+set +e
+"$OVPN_LINK" --config "$OVPN_DIR/parse-test.conf" --help >/tmp/openvpn-xor-accept-test.log 2>&1
+set -e
 
-# Configure OpenVPN
-echo -e "${YELLOW}[6/10] Configuring OpenVPN...${NC}"
-
-./configure \
-    --with-crypto-library=openssl \
-    --enable-x509-alt-username \
-    --enable-iproute2 \
-    --enable-pam-dynamic \
-    --disable-debug \
-    --disable-unit-tests \
-    --quiet 2>&1 | tail -5
-
-echo -e "${GREEN}  ✓ Configuration complete${NC}"
-
-# Compile
-echo -e "${YELLOW}[7/10] Compiling OpenVPN (this may take 5-10 minutes)...${NC}"
-
-make -j$(nproc) 2>&1 | grep -E "(CC|LD)" | tail -10
-
-echo -e "${GREEN}  ✓ Compilation complete${NC}"
-
-# Install
-echo -e "${YELLOW}[8/10] Installing OpenVPN...${NC}"
-
-make install 2>/dev/null
-
-# Verify installation
-if ! /usr/local/sbin/openvpn --version | grep -q "OpenVPN ${OVPN_VERSION}"; then
-    echo -e "${RED}✗ Installation verification failed${NC}"
-    exit 1
+if grep -Eiq "Unrecognized option.*scramble|unknown option.*scramble|Options error.*scramble" /tmp/openvpn-xor-accept-test.log; then
+  echo "ERROR: built binary does not accept scramble option"
+  cat /tmp/openvpn-xor-accept-test.log
+  exit 1
 fi
 
-echo -e "${GREEN}  ✓ OpenVPN installed${NC}"
+echo "OK: binary accepts scramble option"
+rm -f "$OVPN_DIR/parse-test.conf"
 
-# Setup directories
-echo -e "${YELLOW}[9/10] Setting up directories...${NC}"
+echo "=== Write server config ==="
 
-mkdir -p "${XOR_DIR}"
-mkdir -p "${ADMIN_DIR}/clients"
-mkdir -p "${XOR_DIR}/easy-rsa"
-
-echo -e "${GREEN}  ✓ Directories created${NC}"
-
-# Install easy-rsa
-echo -e "${YELLOW}[10/10] Setting up easy-rsa...${NC}"
-
-# Download easy-rsa
-if [ ! -d "${XOR_DIR}/easy-rsa" ]; then
-    wget -q https://github.com/OpenVPN/easy-rsa/releases/download/v3.1.7/EasyRSA-3.1.7.tgz
-    tar -xzf EasyRSA-3.1.7.tgz
-    mv EasyRSA-3.1.7/* "${XOR_DIR}/easy-rsa/"
-    rm -rf EasyRSA-3.1.7 EasyRSA-3.1.7.tgz
-fi
-
-cd "${XOR_DIR}/easy-rsa"
-
-# Initialize PKI
-./easyrsa init-pki 2>/dev/null || true
-
-# Build CA
-if [ ! -f "pki/ca.crt" ]; then
-    ./easyrsa build-ca nopass 2>/dev/null
-fi
-
-# Generate server certificate
-if [ ! -f "pki/issued/server.crt" ]; then
-    ./easyrsa build-server-full server nopass 2>/dev/null
-fi
-
-# Generate CRL
-./easyrsa gen-crl 2>/dev/null
-
-cp pki/{ca.crt,issued/server.crt,private/server.key,crl.pem} "${XOR_DIR}/"
-cp pki/issued/server.crt "${XOR_DIR}/ca.crt"
-
-# Generate DH parameters
-openssl dhparam -dsaparam -out "${XOR_DIR}/dh.pem" 2048 2>/dev/null
-
-# Generate TLS-AUTH key
-openvpn --genkey secret "${XOR_DIR}/ta.key" 2>/dev/null
-
-# Set permissions
-chmod 600 "${XOR_DIR}"/*.key "${XOR_DIR}"/pki/*.key 2>/dev/null || true
-
-echo -e "${GREEN}  ✓ PKI initialized${NC}"
-
-# Generate XOR mask
-XOR_MASK=$(openssl rand -hex 8)
-echo "${XOR_MASK}" > "${XOR_DIR}/xormask.txt"
-
-# Create server config
-echo -e "${YELLOW}[11/11] Creating server configuration...${NC}"
-
-cat > "${XOR_DIR}/server.conf" << EOF
-port 443
-proto udp
-dev tun0
-
-ca ${XOR_DIR}/ca.crt
-cert ${XOR_DIR}/issued/server.crt
-key ${XOR_DIR}/private/server.key
-dh ${XOR_DIR}/dh.pem
-tls-crypt ${XOR_DIR}/ta.key
-
-server 10.8.0.0 255.255.255.0
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 8.8.8.8"
-push "dhcp-option DNS 8.8.4.4"
-
-keepalive 10 120
-cipher AES-256-GCM
-auth SHA256
-data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
-data-ciphers-fallback AES-256-GCM
-
-scramble xormask ${XOR_MASK}
+cat > "$OVPN_DIR/server.conf" <<EOF
+port $PORT
+proto $PROTO
+dev tun
+disable-dco
 
 persist-key
 persist-tun
 
-status /var/log/openvpn-xor-status.log
+topology subnet
+server $VPN_SUBNET $VPN_NETMASK
+
+ca $EASYRSA_DIR/pki/ca.crt
+cert $EASYRSA_DIR/pki/issued/server.crt
+key $EASYRSA_DIR/pki/private/server.key
+
+dh none
+tls-groups secp256r1
+
+tls-crypt $OVPN_DIR/tls-crypt.key
+crl-verify $OVPN_DIR/crl.pem
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+data-ciphers-fallback AES-256-GCM
+auth SHA256
+
+keepalive 10 120
+
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 8.8.8.8"
+
+scramble xormask $XOR_MASK
+
 verb 3
+status /var/log/openvpn-xor-status.log
+log-append /var/log/openvpn-xor.log
+
 explicit-exit-notify 1
-
-# Performance tuning
-txqueuelen 1000
-tx bytes 4194304
-rx bytes 4194304
-
-# Security
-user nobody
-group nogroup
 EOF
 
-# Create systemd service
-cat > /etc/systemd/system/openvpn-xor.service << EOFSVC
+echo "=== Enable IPv4 forwarding ==="
+
+cat > /etc/sysctl.d/99-openvpn-xor.conf <<EOF
+net.ipv4.ip_forward=1
+EOF
+
+sysctl --system
+
+echo "=== Detect external interface ==="
+
+EXT_IFACE="$(ip route get 1.1.1.1 | awk '{for(i=1;i<=NF;i++) if ($i=="dev") print $(i+1)}' | head -n1)"
+
+if [[ -z "$EXT_IFACE" ]]; then
+  echo "ERROR: could not detect external interface"
+  exit 1
+fi
+
+echo "External interface: $EXT_IFACE"
+
+echo "=== Configure firewall/NAT ==="
+
+iptables -C INPUT -p udp --dport "$PORT" -j ACCEPT 2>/dev/null || \
+iptables -A INPUT -p udp --dport "$PORT" -j ACCEPT
+
+iptables -C INPUT -i tun+ -j ACCEPT 2>/dev/null || \
+iptables -A INPUT -i tun+ -j ACCEPT
+
+iptables -C FORWARD -i tun+ -j ACCEPT 2>/dev/null || \
+iptables -A FORWARD -i tun+ -j ACCEPT
+
+iptables -C FORWARD -i tun+ -o "$EXT_IFACE" -j ACCEPT 2>/dev/null || \
+iptables -A FORWARD -i tun+ -o "$EXT_IFACE" -j ACCEPT
+
+iptables -C FORWARD -i "$EXT_IFACE" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+iptables -A FORWARD -i "$EXT_IFACE" -o tun+ -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o "$EXT_IFACE" -j MASQUERADE 2>/dev/null || \
+iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$EXT_IFACE" -j MASQUERADE
+
+netfilter-persistent save
+
+echo "=== Create systemd service ==="
+
+cat > /etc/systemd/system/openvpn-xor.service <<EOF
 [Unit]
 Description=OpenVPN XOR Server
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=forking
-ExecStart=/usr/local/sbin/openvpn --config ${XOR_DIR}/server.conf
-ExecReload=/bin/kill -HUP \$MAINPID
-PIDFile=/var/run/openvpn-xor.pid
-Restart=always
-RestartSec=5
-LimitNOFILE=65536
+Type=simple
+ExecStart=$OVPN_BIN --config $OVPN_DIR/server.conf
+Restart=on-failure
+RestartSec=3
+LimitNPROC=100
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_SETGID CAP_SETUID CAP_SETPCAP
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+DeviceAllow=/dev/net/tun rw
+ProtectSystem=false
+ProtectHome=false
 
 [Install]
 WantedBy=multi-user.target
-EOFSVC
+EOF
 
-# Enable IP forwarding
-sysctl -w net.ipv4.ip_forward=1 2>/dev/null
-echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn.conf
-
-# Setup NAT (assuming eth0 is main interface)
-MAIN_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${MAIN_INTERFACE} -j MASQUERADE 2>/dev/null || true
-
-# Save iptables rules
-mkdir -p /etc/iptables
-iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
-    (iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${MAIN_INTERFACE} -j MASQUERADE && \
-     iptables -A FORWARD -i tun0 -j ACCEPT && \
-     iptables -A FORWARD -o tun0 -j ACCEPT)
-
-# Reload systemd and start service
 systemctl daemon-reload
 systemctl enable openvpn-xor
-systemctl start openvpn-xor
 
-sleep 3
+echo "=== Write admin config ==="
 
-# Verify service
-if systemctl is-active --quiet openvpn-xor; then
-    echo -e "${GREEN}  ✓ OpenVPN XOR service started${NC}"
-else
-    echo -e "${RED}  ✗ Service failed to start${NC}"
-    journalctl -u openvpn-xor -n 20 --no-pager
-    exit 1
+cat > "$ADMIN_DIR/config.env" <<EOF
+SERVER_HOST=$SERVER_HOST
+PORT=$PORT
+PROTO=$PROTO
+XOR_MASK=$XOR_MASK
+OVPN_DIR=$OVPN_DIR
+EASYRSA_DIR=$EASYRSA_DIR
+CLIENTS_DIR=$CLIENTS_DIR
+OVPN_BIN=$OVPN_BIN
+OVPN_LINK=$OVPN_LINK
+EXPORT_DIR=$EXPORT_DIR
+SFTP_USER=$SFTP_USER
+EOF
+
+chmod 600 "$ADMIN_DIR/config.env"
+
+echo "=== Create admin scripts ==="
+
+cat > "$ADMIN_DIR/add-user.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+USER_NAME="${1:-}"
+
+if [[ -z "$USER_NAME" ]]; then
+  echo "Usage: $0 username"
+  exit 1
 fi
 
-# Create admin scripts
-echo -e "${YELLOW}Creating admin scripts...${NC}"
-
-# add-user.sh script
-cat > "${ADMIN_DIR}/add-user.sh" << 'EOFCREATE'
-#!/bin/bash
-set -e
-
-USER_NAME="$1"
-XOR_DIR="/etc/openvpn/xor"
-ADMIN_DIR="/root/ovpn-xor-admin"
-
-if [ -z "$USER_NAME" ]; then
-    echo "Usage: $0 <username>"
-    exit 1
+if [[ "$USER_NAME" =~ [^a-zA-Z0-9._-] ]]; then
+  echo "Username may contain only letters, numbers, dot, underscore, hyphen"
+  exit 1
 fi
 
-cd "${XOR_DIR}/easy-rsa"
+source /root/ovpn-xor-admin/config.env
 
-./easyrsa build-client-full ${USER_NAME} nopass 2>&1 | grep -E "(generated|signing)"
+mkdir -p "$CLIENTS_DIR"
 
-# Generate client config
-cat > "${ADMIN_DIR}/clients/${USER_NAME}.ovpn" << EOF
+cd "$EASYRSA_DIR"
+
+if [[ -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" ]]; then
+  echo "User already exists: $USER_NAME"
+  exit 1
+fi
+
+EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass
+
+CA="$(cat "$EASYRSA_DIR/pki/ca.crt")"
+CERT="$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$EASYRSA_DIR/pki/issued/$USER_NAME.crt")"
+KEY="$(cat "$EASYRSA_DIR/pki/private/$USER_NAME.key")"
+TLS="$(cat "$OVPN_DIR/tls-crypt.key")"
+
+cat > "$CLIENTS_DIR/$USER_NAME.ovpn" <<EOC
 client
 dev tun
-proto udp
+proto $PROTO
 
-remote $(curl -s -4 ifconfig.me || echo 'SERVER_IP') 443
+remote $SERVER_HOST $PORT
 
 resolv-retry infinite
 nobind
@@ -400,123 +429,270 @@ data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 data-ciphers-fallback AES-256-GCM
 auth SHA256
 
-scramble xormask $(cat ${XOR_DIR}/xormask.txt)
+scramble xormask $XOR_MASK
 
 verb 3
 
 <ca>
-$(cat ${XOR_DIR}/ca.crt)
+$CA
 </ca>
 
 <cert>
-$(openssl x509 -in ${XOR_DIR}/easy-rsa/pki/issued/${USER_NAME}.crt)
+$CERT
 </cert>
 
 <key>
-$(cat ${XOR_DIR}/easy-rsa/pki/private/${USER_NAME}.key)
+$KEY
 </key>
 
 <tls-crypt>
-$(cat ${XOR_DIR}/ta.key)
+$TLS
 </tls-crypt>
+EOC
+
+chmod 600 "$CLIENTS_DIR/$USER_NAME.ovpn"
+
+echo "Created user: $USER_NAME"
+echo "Config: $CLIENTS_DIR/$USER_NAME.ovpn"
+
+if [[ -n "${EXPORT_DIR:-}" && -n "${SFTP_USER:-}" && -d "/home/$SFTP_USER" ]]; then
+  mkdir -p "$EXPORT_DIR"
+  cp "$CLIENTS_DIR/$USER_NAME.ovpn" "$EXPORT_DIR/$USER_NAME.ovpn"
+  chown "$SFTP_USER:$SFTP_USER" "$EXPORT_DIR/$USER_NAME.ovpn"
+  chmod 600 "$EXPORT_DIR/$USER_NAME.ovpn"
+  echo "Exported for SFTP: $EXPORT_DIR/$USER_NAME.ovpn"
+fi
 EOF
 
-echo "Client ${USER_NAME} created successfully!"
-echo "Config: ${ADMIN_DIR}/clients/${USER_NAME}.ovpn"
-EOFCREATE
+chmod +x "$ADMIN_DIR/add-user.sh"
 
-chmod +x "${ADMIN_DIR}/add-user.sh"
+cat > "$ADMIN_DIR/revoke-user.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
 
-# revoke-user.sh script
-cat > "${ADMIN_DIR}/revoke-user.sh" << 'EOFCREATE'
-#!/bin/bash
-set -e
+USER_NAME="${1:-}"
 
-USER_NAME="$1"
-XOR_DIR="/etc/openvpn/xor"
-
-if [ -z "$USER_NAME" ]; then
-    echo "Usage: $0 <username>"
-    exit 1
+if [[ -z "$USER_NAME" ]]; then
+  echo "Usage: $0 username"
+  exit 1
 fi
 
-cd "${XOR_DIR}/easy-rsa"
+source /root/ovpn-xor-admin/config.env
 
-./easyrsa revoke ${USER_NAME} 2>&1 | grep -E "(revoked|Revoking)"
-./easyrsa gen-crl 2>&1 | grep -E "(CRL|generated)"
+cd "$EASYRSA_DIR"
 
-cp pki/crl.pem ${XOR_DIR}/crl.pem
+if [[ ! -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" ]]; then
+  echo "User certificate not found: $USER_NAME"
+  exit 1
+fi
 
-# Kill user's connection
-pkill -f ${USER_NAME}
+EASYRSA_BATCH=1 ./easyrsa revoke "$USER_NAME"
+./easyrsa gen-crl
 
-echo "Client ${USER_NAME} revoked successfully!"
-EOFCREATE
+cp "$EASYRSA_DIR/pki/crl.pem" "$OVPN_DIR/crl.pem"
+chmod 644 "$OVPN_DIR/crl.pem"
 
-chmod +x "${ADMIN_DIR}/revoke-user.sh"
+rm -f "$CLIENTS_DIR/$USER_NAME.ovpn"
+rm -f "$EXPORT_DIR/$USER_NAME.ovpn" 2>/dev/null || true
 
-# list-users.sh script
-cat > "${ADMIN_DIR}/list-users.sh" << 'EOFCREATE'
-#!/bin/bash
-XOR_DIR="/etc/openvpn/xor"
-ADMIN_DIR="/root/ovpn-xor-admin"
+systemctl restart openvpn-xor
 
-echo "Active VPN Clients:"
-echo ""
+echo "Revoked user: $USER_NAME"
+EOF
 
-cd "${XOR_DIR}/easy-rsa"
+chmod +x "$ADMIN_DIR/revoke-user.sh"
 
-# List all certificates except server
-ls pki/issued/*.crt 2>/dev/null | grep -v server.crt | while read cert; do
-    name=$(basename "$cert" .crt)
+cat > "$ADMIN_DIR/list-users.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
 
-    # Check if revoked
-    if grep -q "V=${name}" pki/index.txt; then
-        status=$(grep "V=${name}" pki/index.txt | awk '{print $1}')
-        if [ "$status" = "V" ]; then
-            echo "  ✓ ${name}"
-        fi
-    fi
-done
-EOFCREATE
+INDEX="/etc/openvpn/xor/easy-rsa/pki/index.txt"
 
-chmod +x "${ADMIN_DIR}/list-users.sh"
+if [[ ! -f "$INDEX" ]]; then
+  echo "No EasyRSA index found"
+  exit 1
+fi
 
-# Final summary
-echo ""
-echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                                                              ║${NC}"
-echo -e "${GREEN}║     ✓ OpenVPN XOR Installation Complete!                    ║${NC}"
-echo -e "${GREEN}║                                                              ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-echo -e "${CYAN}Configuration:${NC}"
-echo "  Server IP:     ${GREEN}${SERVER_IP}${NC}"
-echo "  Port:          ${GREEN}443/udp${NC}"
-echo "  Network:       ${GREEN}10.8.0.0/24${NC}"
-echo "  XOR Mask:      ${GREEN}${XOR_MASK}${NC}"
-echo ""
-echo -e "${CYAN}Files:${NC}"
-echo "  Config:        ${XOR_DIR}/server.conf"
-echo "  Admin scripts: ${ADMIN_DIR}/"
-echo ""
-echo -e "${CYAN}Commands:${NC}"
-echo "  Add client:    ${ADMIN_DIR}/add-user.sh <username>"
-echo "  Revoke client: ${ADMIN_DIR}/revoke-user.sh <username>"
-echo "  List clients:  ${ADMIN_DIR}/list-users.sh"
-echo "  Service:       systemctl status openvpn-xor"
-echo ""
-echo -e "${CYAN}Client Template (.ovpn):${NC}"
-echo "  remote ${SERVER_IP} 443"
-echo "  scramble xormask ${XOR_MASK}"
-echo ""
-echo -e "${YELLOW}⚠️  Important:${NC}"
-echo "  1. Open port 443/udp in your firewall"
-echo "  2. Test connection: telnet ${SERVER_IP} 443"
-echo "  3. Check service: systemctl status openvpn-xor"
-echo ""
+echo "Active users:"
+awk '$1 == "V" && $5 ~ /CN=/ {print "- " $5}' "$INDEX" | sed 's|/CN=||g' || true
 
-# Cleanup build directory
-rm -rf "$BUILD_DIR"
+echo
+echo "Revoked users:"
+awk '$1 == "R" && $5 ~ /CN=/ {print "- " $5}' "$INDEX" | sed 's|/CN=||g' || true
+EOF
 
-echo "Build directory cleaned. Installation complete!"
+chmod +x "$ADMIN_DIR/list-users.sh"
+
+cat > "$ADMIN_DIR/status.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== Service ==="
+systemctl status openvpn-xor --no-pager | head -80 || true
+
+echo
+echo "=== Listening UDP 443 ==="
+ss -lunpt | grep ':443' || true
+
+echo
+echo "=== OpenVPN status file ==="
+cat /var/log/openvpn-xor-status.log 2>/dev/null || echo "No status file yet"
+
+echo
+echo "=== Last logs ==="
+journalctl -u openvpn-xor -n 80 --no-pager || true
+EOF
+
+chmod +x "$ADMIN_DIR/status.sh"
+
+cat > "$ADMIN_DIR/check.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+source /root/ovpn-xor-admin/config.env
+
+echo "=== Binary ==="
+"$OVPN_LINK" --version | head -10
+
+echo
+echo "=== Config scramble line ==="
+grep -n "scramble" "$OVPN_DIR/server.conf" || true
+
+echo
+echo "=== Parse-test scramble ==="
+cat > /tmp/openvpn-xor-parse-test.conf <<EOC
+dev null
+ifconfig-noexec
+route-noexec
+verb 4
+scramble xormask testmask123
+EOC
+
+set +e
+"$OVPN_LINK" --config /tmp/openvpn-xor-parse-test.conf --help >/tmp/openvpn-xor-parse-test.log 2>&1
+set -e
+
+if grep -Eiq "Unrecognized option.*scramble|unknown option.*scramble|Options error.*scramble" /tmp/openvpn-xor-parse-test.log; then
+  echo "ERROR: scramble not supported"
+  tail -40 /tmp/openvpn-xor-parse-test.log
+else
+  echo "OK: no unrecognized scramble error"
+fi
+
+echo
+echo "=== Service ==="
+systemctl is-active openvpn-xor || true
+
+echo
+echo "=== Port ==="
+ss -lunpt | grep ':443' || true
+
+echo
+echo "=== Export dir ==="
+ls -la "$EXPORT_DIR" 2>/dev/null || true
+EOF
+
+chmod +x "$ADMIN_DIR/check.sh"
+
+cat > "$ADMIN_DIR/backup.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKUP_FILE="/root/openvpn-xor-backup-$(date +%F-%H%M%S).tar.gz"
+
+tar -czf "$BACKUP_FILE" \
+  /etc/openvpn/xor \
+  /root/ovpn-xor-admin \
+  /etc/systemd/system/openvpn-xor.service
+
+chmod 600 "$BACKUP_FILE"
+
+echo "Backup created:"
+echo "$BACKUP_FILE"
+EOF
+
+chmod +x "$ADMIN_DIR/backup.sh"
+
+cat > /usr/local/bin/export-ovpn <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CLIENT="${1:-}"
+
+if [[ -z "$CLIENT" ]]; then
+  echo "Usage: export-ovpn clientname"
+  exit 1
+fi
+
+source /root/ovpn-xor-admin/config.env
+
+SRC="$CLIENTS_DIR/$CLIENT.ovpn"
+DST="$EXPORT_DIR/$CLIENT.ovpn"
+
+if [[ ! -f "$SRC" ]]; then
+  echo "Config not found: $SRC"
+  exit 1
+fi
+
+mkdir -p "$EXPORT_DIR"
+cp "$SRC" "$DST"
+chown "$SFTP_USER:$SFTP_USER" "$DST"
+chmod 600 "$DST"
+
+echo "Exported: $DST"
+EOF
+
+chmod +x /usr/local/bin/export-ovpn
+
+echo "=== Start OpenVPN XOR service ==="
+
+rm -f /var/log/openvpn-xor.log
+systemctl restart openvpn-xor
+sleep 2
+
+if ! systemctl is-active --quiet openvpn-xor; then
+  echo "ERROR: openvpn-xor service is not active"
+  echo "Manual debug:"
+  echo "$OVPN_BIN --config $OVPN_DIR/server.conf --verb 7"
+  tail -120 /var/log/openvpn-xor.log 2>/dev/null || true
+  journalctl -u openvpn-xor -n 80 --no-pager || true
+  exit 1
+fi
+
+echo "=== Create first user ==="
+
+"$ADMIN_DIR/add-user.sh" "$FIRST_USER"
+
+echo
+echo "=== Installation complete ==="
+echo
+echo "Server host: $SERVER_HOST"
+echo "Protocol: $PROTO"
+echo "Port: $PORT"
+echo "XOR mask: $XOR_MASK"
+echo
+echo "First client config:"
+echo "$CLIENTS_DIR/$FIRST_USER.ovpn"
+echo
+echo "SFTP export path:"
+echo "$EXPORT_DIR/$FIRST_USER.ovpn"
+echo
+echo "Admin directory:"
+echo "$ADMIN_DIR"
+echo
+echo "Commands:"
+echo "cd $ADMIN_DIR"
+echo "./add-user.sh username"
+echo "./revoke-user.sh username"
+echo "./list-users.sh"
+echo "./status.sh"
+echo "./check.sh"
+echo "./backup.sh"
+echo "export-ovpn username"
+echo
+echo "Important:"
+echo "Client app must support OpenVPN XOR / scramble xormask."
+
+
+
+
