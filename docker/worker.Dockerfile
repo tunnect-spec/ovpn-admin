@@ -3,7 +3,7 @@ FROM node:22-alpine AS base
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable pnpm && pnpm config set ignore-scripts false && pnpm i --frozen-lockfile
+RUN corepack enable pnpm && pnpm i --frozen-lockfile
 
 COPY . .
 
