@@ -68,7 +68,7 @@ export default function NewNodePage() {
 
   if (result) {
     return (
-      <div className="max-w-3xl space-y-8">
+      <div className="space-y-8">
         {/* Header */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" aria-label="Back to nodes" onClick={() => router.push('/dashboard/nodes')}>
@@ -216,7 +216,7 @@ export default function NewNodePage() {
   }
 
   return (
-    <div className="max-w-2xl space-y-8">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" aria-label="Go back" onClick={() => router.back()}>
@@ -243,7 +243,8 @@ export default function NewNodePage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="space-y-2">
+            <div className="grid gap-6 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="name">Node Name</Label>
               <Input
                 id="name"
@@ -284,6 +285,7 @@ export default function NewNodePage() {
                 max="65535"
                 className="h-11"
               />
+            </div>
             </div>
 
             <div className="flex items-center justify-end gap-4 pt-4">

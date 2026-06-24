@@ -139,7 +139,7 @@ export default function NewClientPage() {
       )}
 
       {jobId ? (
-        <Card className="max-w-2xl">
+        <Card>
           <CardContent className="py-16 text-center">
             <Spinner className="mx-auto mb-4 h-8 w-8 text-primary" label="Creating client" />
             <p className="text-muted-foreground mb-2">Creating client configuration…</p>
@@ -147,7 +147,8 @@ export default function NewClientPage() {
           </CardContent>
         </Card>
       ) : (
-        <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-5 max-w-2xl">
+        <form onSubmit={handleSubmit} className="bg-card text-card-foreground border border-border rounded-lg p-6 space-y-5">
+          <div className="grid gap-5 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="client-name">Client Name</Label>
             <Input
@@ -185,6 +186,7 @@ export default function NewClientPage() {
                 — the config stops connecting after that date.
               </p>
             )}
+          </div>
           </div>
 
           <div className="bg-muted text-muted-foreground border border-border rounded p-4 text-sm">

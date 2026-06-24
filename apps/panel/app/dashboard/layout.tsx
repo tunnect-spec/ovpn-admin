@@ -29,9 +29,9 @@ export default async function DashboardLayout({
 
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
+        {/* Top bar — same centered container as the content so they align. */}
         <header className="glass h-16 border-b border-border/50">
-          <div className="flex h-full items-center justify-between px-4 sm:px-6">
+          <div className="mx-auto flex h-full w-full max-w-[1400px] items-center justify-between px-4 sm:px-6 lg:px-8">
             <div className="flex items-center gap-2">
               <MobileNav userEmail={userEmail} />
               <div className="h-2 w-2 rounded-full bg-emerald-500 pulse-glow" />
@@ -43,9 +43,12 @@ export default async function DashboardLayout({
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-auto p-6 animate-in">
-          {children}
+        {/* Page content — one consistent, centered container so every page has
+            identical left/right gutters and a bounded, symmetric width. */}
+        <main className="flex-1 overflow-auto animate-in">
+          <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+            {children}
+          </div>
         </main>
       </div>
     </div>
