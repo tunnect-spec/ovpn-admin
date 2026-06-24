@@ -31,10 +31,16 @@ function assertValidClientName(name: string): void {
 const OVPN_DIR = '/etc/openvpn/xor';
 const ADMIN_DIR = '/root/ovpn-xor-admin';
 // The XOR installer symlinks the patched binary as `openvpn-xor`. Prefer that,
-// falling back to a plain `openvpn` for other layouts.
-const OVPN_BIN = existsSync('/usr/local/sbin/openvpn-xor')
-  ? '/usr/local/sbin/openvpn-xor'
-  : '/usr/local/sbin/openvpn';
+// falling back to a plain `openvpn` for other layouts. This MUST be resolved per
+// call, not once at module load: the agent typically starts BEFORE OpenVPN is
+// installed (a fresh node), so a value frozen at startup would forever point at
+// the not-yet-existing binary and make checkInstallation() report NOT_INSTALLED
+// even after a successful install — leaving the node stuck "provisioning".
+function resolveOvpnBin(): string {
+  return existsSync('/usr/local/sbin/openvpn-xor')
+    ? '/usr/local/sbin/openvpn-xor'
+    : '/usr/local/sbin/openvpn';
+}
 
 export interface OpenVpnStatus {
   openvpn: 'RUNNING' | 'STOPPED' | 'NOT_INSTALLED' | 'ERROR';
@@ -566,13 +572,14 @@ export class OpenVpnOps {
     };
 
     try {
-      // Check if binary exists
-      await exec('test', ['-f', OVPN_BIN]);
+      // Check if binary exists (resolve the path now, not at module load).
+      const ovpnBin = resolveOvpnBin();
+      await exec('test', ['-f', ovpnBin]);
       result.binaryExists = true;
 
       // Get version
       try {
-        const { stdout: versionOutput } = await exec(OVPN_BIN, ['--version']);
+        const { stdout: versionOutput } = await exec(ovpnBin, ['--version']);
         const versionMatch = versionOutput.match(/OpenVPN (\d+\.\d+\.\d+)/);
         if (versionMatch?.[1]) {
           result.version = versionMatch[1];

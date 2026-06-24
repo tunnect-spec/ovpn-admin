@@ -74,6 +74,25 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       },
     });
 
+    // If a NODE_INSTALL finished successfully, record the OpenVPN version + XOR
+    // mask the agent reported and stamp installedAt, so the panel reflects the
+    // real installed state (the next heartbeat flips status to HEALTHY).
+    if (body.success && job.type === 'NODE_INSTALL') {
+      const result = (body.result ?? {}) as { version?: string; xorMask?: string };
+      const existing = await prisma.node.findUnique({
+        where: { id: nodeId },
+        select: { installedAt: true },
+      });
+      await prisma.node.update({
+        where: { id: nodeId },
+        data: {
+          openvpnVersion: result.version ?? undefined,
+          xorMask: result.xorMask ?? undefined,
+          installedAt: existing?.installedAt ?? new Date(),
+        },
+      });
+    }
+
     // If successful and it's a client creation, update client fingerprint
     if (body.success && job.type === 'CLIENT_CREATE' && body.result) {
       const result = body.result as any;

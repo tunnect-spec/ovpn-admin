@@ -32,6 +32,22 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       // Allow retry install
     }
 
+    // Don't stack installs: if one is already queued or running for this node,
+    // return the existing job instead of creating a duplicate. (Without this, a
+    // user clicking "Install" repeatedly piles up jobs and keeps resetting the
+    // node to PROVISIONING.)
+    const inFlight = await prisma.job.findFirst({
+      where: { nodeId: node.id, type: 'NODE_INSTALL', status: { in: ['PENDING', 'RUNNING'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, type: true, status: true },
+    });
+    if (inFlight) {
+      return NextResponse.json(
+        { error: 'INSTALL_IN_PROGRESS', message: 'An installation is already in progress for this node.', job: inFlight },
+        { status: 409 },
+      );
+    }
+
     // Check if agent is connected (recent heartbeat)
     if (!node.lastHeartbeatAt || Date.now() - node.lastHeartbeatAt.getTime() > 5 * 60 * 1000) {
       return NextResponse.json(
