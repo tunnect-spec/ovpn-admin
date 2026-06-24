@@ -22,15 +22,19 @@ export interface ClientTraffic {
   vpnAddress?: string;     // assigned VPN IP (10.8.0.x)
 }
 
-/** Strip the port from an OpenVPN "real address" (IPv4 `ip:port` or `[ipv6]:port`). */
+/**
+ * Extract the bare IP from an OpenVPN "real address". OpenVPN 2.6+/2.7 prefixes
+ * it with the transport (e.g. `udp4:1.2.3.4:50421`, `udp6:[2a03::1]:50421`);
+ * older builds use a bare `1.2.3.4:50421`. Returns just the IP.
+ */
 function stripPort(addr: string): string {
   if (!addr) return '';
-  const v6 = addr.match(/^\[(.+)\]:\d+$/);
-  if (v6) return v6[1];
-  const idx = addr.lastIndexOf(':');
-  // single colon → ipv4:port; multiple colons with no brackets → leave as-is
-  if (idx > 0 && addr.indexOf(':') === idx) return addr.slice(0, idx);
-  return addr;
+  let a = addr.trim().replace(/^(udp|tcp)[46]?:/i, ''); // drop transport prefix
+  const v6 = a.match(/^\[(.+)\]:\d+$/);
+  if (v6) return v6[1];                                 // [ipv6]:port
+  const idx = a.lastIndexOf(':');
+  if (idx > 0 && a.indexOf(':') === idx) return a.slice(0, idx); // ipv4:port
+  return a;
 }
 
 // Client names are interpolated into root-run shell scripts (add-user.sh /
