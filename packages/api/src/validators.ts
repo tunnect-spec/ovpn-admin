@@ -132,6 +132,10 @@ export const clientTrafficSchema = z.object({
   bytesUp: z.number().int().min(0),
   bytesDown: z.number().int().min(0),
   online: z.boolean(),
+  // Live-session details for currently-online clients (best-effort).
+  connectedSince: z.number().int().min(0).optional(), // epoch seconds
+  realAddress: z.string().max(64).optional(),
+  vpnAddress: z.string().max(64).optional(),
 });
 
 export type ClientTrafficInput = z.infer<typeof clientTrafficSchema>;

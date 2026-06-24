@@ -46,17 +46,38 @@ async function expireClients(now: number): Promise<number> {
   return count;
 }
 
+/**
+ * Clear the online flag for clients whose node stopped reporting. Without this,
+ * a client connected when the agent died would show "online" forever (the last
+ * heartbeat froze online=true). updateMany can't filter by a relation, so we
+ * resolve the stale node ids first.
+ */
+async function clearGhostOnlineClients(now: number): Promise<number> {
+  const threshold = new Date(now - HEARTBEAT_TIMEOUT_MS);
+  const staleNodes = await prisma.node.findMany({
+    where: { lastHeartbeatAt: { lt: threshold } },
+    select: { id: true },
+  });
+  if (staleNodes.length === 0) return 0;
+  const { count } = await prisma.vpnClient.updateMany({
+    where: { nodeId: { in: staleNodes.map((n) => n.id) }, online: true },
+    data: { online: false, connectedSince: null, realAddress: null, vpnAddress: null },
+  });
+  return count;
+}
+
 async function sweep(): Promise<void> {
   const now = Date.now();
   try {
-    const [staleNodes, timedOutJobs, expiredClients] = await Promise.all([
+    const [staleNodes, timedOutJobs, expiredClients, ghostOnline] = await Promise.all([
       markStaleNodesUnhealthy(now),
       reapTimedOutJobs(now),
       expireClients(now),
+      clearGhostOnlineClients(now),
     ]);
-    if (staleNodes || timedOutJobs || expiredClients) {
+    if (staleNodes || timedOutJobs || expiredClients || ghostOnline) {
       console.log(
-        `[maintenance] nodes→UNHEALTHY: ${staleNodes}, jobs→FAILED: ${timedOutJobs}, clients→EXPIRED: ${expiredClients}`,
+        `[maintenance] nodes→UNHEALTHY: ${staleNodes}, jobs→FAILED: ${timedOutJobs}, clients→EXPIRED: ${expiredClients}, online→cleared: ${ghostOnline}`,
       );
     }
   } catch (error) {

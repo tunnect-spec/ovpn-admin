@@ -16,6 +16,21 @@ export interface ClientTraffic {
   bytesUp: number;   // client upload   (server "Bytes Received")
   bytesDown: number; // client download (server "Bytes Sent")
   online: boolean;
+  // Present only for currently-online clients (from the live CLIENT_LIST row).
+  connectedSince?: number; // epoch seconds the session started
+  realAddress?: string;    // public IP the client connects from
+  vpnAddress?: string;     // assigned VPN IP (10.8.0.x)
+}
+
+/** Strip the port from an OpenVPN "real address" (IPv4 `ip:port` or `[ipv6]:port`). */
+function stripPort(addr: string): string {
+  if (!addr) return '';
+  const v6 = addr.match(/^\[(.+)\]:\d+$/);
+  if (v6) return v6[1];
+  const idx = addr.lastIndexOf(':');
+  // single colon → ipv4:port; multiple colons with no brackets → leave as-is
+  if (idx > 0 && addr.indexOf(':') === idx) return addr.slice(0, idx);
+  return addr;
 }
 
 // Client names are interpolated into root-run shell scripts (add-user.sh /
@@ -495,14 +510,23 @@ export class OpenVpnOps {
    * Parse the current (live) session bytes per Common Name from a status-version 2
    * file. CLIENT_LIST rows are: CLIENT_LIST,<CN>,<real>,<vaddr>,<vaddr6>,<bytesRecv>,<bytesSent>,...
    */
-  private parseSessions(status: string): Map<string, { up: number; down: number }> {
-    const sessions = new Map<string, { up: number; down: number }>();
+  private parseSessions(
+    status: string,
+  ): Map<string, { up: number; down: number; realAddress?: string; vpnAddress?: string; connectedSince?: number }> {
+    // CLIENT_LIST,<CN>,<real:port>,<vaddr>,<vaddr6>,<recv>,<sent>,<since-human>,<since-epoch>,...
+    const sessions = new Map<
+      string,
+      { up: number; down: number; realAddress?: string; vpnAddress?: string; connectedSince?: number }
+    >();
     for (const line of status.split('\n')) {
       const p = line.split(',');
       if (p[0] === 'CLIENT_LIST' && p[1] && CLIENT_NAME_RE.test(p[1])) {
         sessions.set(p[1], {
           up: parseInt(p[5] || '0', 10) || 0,   // server received = client upload
           down: parseInt(p[6] || '0', 10) || 0, // server sent     = client download
+          realAddress: stripPort((p[2] || '').trim()) || undefined,
+          vpnAddress: (p[3] || '').trim() || undefined,
+          connectedSince: parseInt(p[8] || '0', 10) || undefined,
         });
       }
     }
@@ -557,6 +581,13 @@ export class OpenVpnOps {
         bytesUp: acc.up + (live?.up ?? 0),
         bytesDown: acc.down + (live?.down ?? 0),
         online: !!live,
+        ...(live
+          ? {
+              connectedSince: live.connectedSince,
+              realAddress: live.realAddress,
+              vpnAddress: live.vpnAddress,
+            }
+          : {}),
       });
     }
     return result;

@@ -23,10 +23,67 @@ interface Client {
   revokedAt: string | null;
   disabledAt?: string | null;
   expiresAt?: string | null;
+  lastSeenAt?: string | null;
+  connectedSince?: string | null;
+  realAddress?: string | null;
+  vpnAddress?: string | null;
   bytesUp: number;
   bytesDown: number;
   online: boolean;
   artifactCount: number;
+}
+
+/** "just now" / "5 min ago" / "3h ago" / "2d ago". */
+function timeAgo(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 45) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
+/** Compact session duration since a start time: "<1m" / "45m" / "1h 23m" / "2d 4h". */
+function durationSince(iso: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m`;
+  return '<1m';
+}
+
+/** Live status + last-seen / current-session details. */
+function ActivityCell({ client }: { client: Client }) {
+  if (client.online) {
+    return (
+      <div>
+        <div className="flex items-center gap-1.5 font-medium text-emerald-400">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          Online now
+        </div>
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          {client.connectedSince && <span>for {durationSince(client.connectedSince)}</span>}
+          {client.realAddress && <span> · {client.realAddress}</span>}
+          {client.vpnAddress && <span> · {client.vpnAddress}</span>}
+        </div>
+      </div>
+    );
+  }
+  return client.lastSeenAt ? (
+    <span className="text-sm text-muted-foreground" title={new Date(client.lastSeenAt).toLocaleString()}>
+      Last seen {timeAgo(client.lastSeenAt)}
+    </span>
+  ) : (
+    <span className="text-sm text-muted-foreground/60">Never connected</span>
+  );
 }
 
 const TH = 'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase';
@@ -78,27 +135,38 @@ export default function NodeClientsPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const data = await apiFetch<{ clients: Client[] }>(`/api/nodes/${nodeId}/clients`);
       setClients(data.clients || []);
+      if (silent) setError(null);
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         router.push('/login');
         return;
       }
-      const message = err instanceof Error ? err.message : 'Failed to load clients';
-      setError(message);
-      toast({ variant: 'destructive', title: 'Failed to load clients', description: message });
+      if (!silent) {
+        const message = err instanceof Error ? err.message : 'Failed to load clients';
+        setError(message);
+        toast({ variant: 'destructive', title: 'Failed to load clients', description: message });
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [nodeId, router]);
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Keep online status / last-seen fresh without a manual reload (~20s, silent).
+  useEffect(() => {
+    const t = setInterval(() => load(true), 20000);
+    return () => clearInterval(t);
   }, [load]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -184,7 +252,17 @@ export default function NodeClientsPage() {
       <div className="flex justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold">Clients</h2>
-          <p className="text-muted-foreground mt-1">Manage VPN client configurations</p>
+          <p className="text-muted-foreground mt-1">
+            Manage VPN client configurations
+            {clients.length > 0 && (
+              <>
+                {' · '}
+                <span className="text-emerald-400 font-medium">{clients.filter((c) => c.online).length} online</span>
+                {' / '}
+                {clients.length} total
+              </>
+            )}
+          </p>
         </div>
         <Button asChild className="gap-2">
           <Link href={`/dashboard/nodes/${nodeId}/clients/new`}>
@@ -214,6 +292,7 @@ export default function NodeClientsPage() {
                 <tr>
                   <th scope="col" className={TH}>Name</th>
                   <th scope="col" className={TH}>Status</th>
+                  <th scope="col" className={TH}>Activity</th>
                   <th scope="col" className={TH}>Traffic (↑ up / ↓ down)</th>
                   <th scope="col" className={TH}>Created</th>
                   <th scope="col" className={TH}>Expires</th>
@@ -240,6 +319,9 @@ export default function NodeClientsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <Badge variant={status.variant}>{status.label}</Badge>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <ActivityCell client={client} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className="text-emerald-400">↑ {formatBytes(client.bytesUp)}</span>

@@ -124,6 +124,11 @@ model VpnClient {
   bytesDown BigInt  @default(0)
   online    Boolean @default(false)
 
+  // Live-session details for a currently-online client (cleared when offline).
+  connectedSince DateTime?   // start of the current session
+  realAddress    String?     // public IP the client connects from
+  vpnAddress     String?     // assigned VPN IP (10.8.0.x)
+
   artifacts ClientArtifact[]
   auditLogs AuditLog[]
 

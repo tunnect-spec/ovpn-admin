@@ -88,7 +88,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Persist per-client traffic (cumulative, reported by the agent).
+    // Persist per-client traffic + live-session details (reported by the agent).
+    // When online: stamp lastSeenAt and the current session (since / IPs).
+    // When offline: clear the session fields so stale data isn't shown.
     if (input.clients && input.clients.length > 0) {
       await Promise.all(
         input.clients.map((c) =>
@@ -98,7 +100,14 @@ export async function POST(request: NextRequest) {
               bytesUp: BigInt(c.bytesUp),
               bytesDown: BigInt(c.bytesDown),
               online: c.online,
-              ...(c.online ? { lastSeenAt: now } : {}),
+              ...(c.online
+                ? {
+                    lastSeenAt: now,
+                    connectedSince: c.connectedSince ? new Date(c.connectedSince * 1000) : null,
+                    realAddress: c.realAddress ?? null,
+                    vpnAddress: c.vpnAddress ?? null,
+                  }
+                : { connectedSince: null, realAddress: null, vpnAddress: null }),
             },
           }),
         ),
