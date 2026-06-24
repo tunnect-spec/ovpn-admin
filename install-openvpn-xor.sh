@@ -367,6 +367,7 @@ EOF
 if [[ -x "$OVPN_BIN" && -f "$EASYRSA_DIR/pki/ca.crt" ]]; then
   echo "=== OpenVPN already installed - reconfiguring only ==="
   echo "OBFUSCATION=$OBFUSCATION CIPHER=$CIPHER AUTH=$AUTH PROTO=$PROTO PORT=$PORT TUNNEL=$TUNNEL_MODE C2C=$CLIENT_TO_CLIENT DUP=$DUPLICATE_CN DNS=$DNS_MODE DOMAIN=${DOMAIN:-<server ip>} MTU=$MTU MSSFIX=$MSSFIX"
+  echo "PROGRESS:30:Applying new configuration"
   install_disconnect_hook
   write_server_conf
   write_config_env
@@ -376,9 +377,10 @@ if [[ -x "$OVPN_BIN" && -f "$EASYRSA_DIR/pki/ca.crt" ]]; then
   iptables -C INPUT -p "$PROTO" --dport "$PORT" -j ACCEPT 2>/dev/null || \
     iptables -A INPUT -p "$PROTO" --dport "$PORT" -j ACCEPT
   netfilter-persistent save 2>/dev/null || true
+  echo "PROGRESS:90:Restarting OpenVPN"
   systemctl restart openvpn-xor 2>/dev/null || systemctl start openvpn-xor 2>/dev/null || true
   sleep 1
-  systemctl is-active --quiet openvpn-xor && echo "OK: reconfigured" || {
+  systemctl is-active --quiet openvpn-xor && { echo "PROGRESS:100:Reconfigured"; echo "OK: reconfigured"; } || {
     echo "ERROR: openvpn-xor failed to start after reconfigure"
     tail -40 /var/log/openvpn-xor.log 2>/dev/null || true
     journalctl -u openvpn-xor -n 40 --no-pager 2>/dev/null || true
@@ -397,10 +399,12 @@ echo
 
 sleep 2
 
+echo "PROGRESS:5:Preparing installation"
 echo "=== Stop old service ==="
 systemctl stop openvpn-xor 2>/dev/null || true
 systemctl reset-failed openvpn-xor 2>/dev/null || true
 
+echo "PROGRESS:12:Installing dependencies"
 echo "=== Install dependencies ==="
 
 # CRITICAL: this installer runs as a child of the ovpn-agent systemd service.
@@ -450,6 +454,7 @@ rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT"
 cd "$BUILD_ROOT"
 
+echo "PROGRESS:28:Downloading OpenVPN source"
 echo "=== Download OpenVPN $OPENVPN_VERSION source ==="
 
 wget -O "openvpn-$OPENVPN_VERSION.tar.gz" \
@@ -486,6 +491,7 @@ if [[ "$PATCH_COUNT" -ne 5 ]]; then
   exit 1
 fi
 
+echo "PROGRESS:38:Applying obfuscation patches"
 echo "=== Apply XOR patches ==="
 
 cd "$SRC_DIR"
@@ -525,12 +531,14 @@ grep -R "scramble" -n src/openvpn >/dev/null || {
 
 echo "OK: patched source contains XOR/scramble code"
 
+echo "PROGRESS:45:Compiling OpenVPN from source (this takes a few minutes)"
 echo "=== Build OpenVPN XOR ==="
 
 autoreconf -i -v -f
 ./configure --prefix="$OVPN_PREFIX"
 make clean || true
 make -j"$(nproc)"
+echo "PROGRESS:68:Installing compiled binary"
 make install
 
 if [[ ! -x "$OVPN_BIN" ]]; then
@@ -549,6 +557,7 @@ mkdir -p "$OVPN_DIR"
 mkdir -p "$ADMIN_DIR"
 mkdir -p "$CLIENTS_DIR"
 
+echo "PROGRESS:78:Generating PKI and certificates"
 echo "=== Setup EasyRSA ==="
 
 if [[ -f "$EASYRSA_DIR/pki/ca.crt" ]]; then
@@ -625,6 +634,7 @@ fi
 
 echo "External interface: $EXT_IFACE"
 
+echo "PROGRESS:88:Configuring firewall and routing"
 echo "=== Configure firewall/NAT ==="
 
 iptables -C INPUT -p "$PROTO" --dport "$PORT" -j ACCEPT 2>/dev/null || \
@@ -868,6 +878,7 @@ EOF
 
 chmod +x /usr/local/bin/export-ovpn
 
+echo "PROGRESS:94:Starting OpenVPN service"
 echo "=== Start OpenVPN XOR service ==="
 
 rm -f /var/log/openvpn-xor.log
@@ -883,6 +894,7 @@ if ! systemctl is-active --quiet openvpn-xor; then
   exit 1
 fi
 
+echo "PROGRESS:98:Creating first client"
 echo "=== Create first user ==="
 
 "$ADMIN_DIR/add-user.sh" "$FIRST_USER"

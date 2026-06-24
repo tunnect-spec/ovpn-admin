@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { connect as netConnect } from 'net';
@@ -562,7 +562,10 @@ export class OpenVpnOps {
    * on an already-installed node it only regenerates config + restarts (fast,
    * PKI preserved); on a fresh node it builds from source (several minutes).
    */
-  async installOpenVpn(payload: any = {}): Promise<{ installed: boolean; version?: string; xorMask?: string }> {
+  async installOpenVpn(
+    payload: any = {},
+    onProgress?: (pct: number, message: string) => void,
+  ): Promise<{ installed: boolean; version?: string; xorMask?: string }> {
     const candidates = [
       '/opt/ovpn-admin-src/install-openvpn-xor.sh',
       '/opt/ovpn-agent/install-openvpn-xor.sh',
@@ -601,11 +604,67 @@ export class OpenVpnOps {
       RESTORE: payload.restore ? '1' : '0',
     };
 
-    // Up to 45 min to allow a from-source compile on the first install.
-    await exec('bash', [installer], { env, timeout: 45 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+    // Stream the installer (up to 45 min for a from-source compile on the first
+    // install) so we can surface real progress to the panel as it runs.
+    await this.runInstaller(installer, env, onProgress);
 
     const info = await this.checkInstallation();
     return { installed: info.installed, version: info.version, xorMask: info.xorMask };
+  }
+
+  /**
+   * Run the installer, streaming its output line-by-line. Lines of the form
+   * `PROGRESS:<pct>:<message>` are forwarded to onProgress so the panel's
+   * progress bar reflects the real install stage. A tail of recent output is
+   * kept so a failure can report where it died instead of a bare exit code.
+   */
+  private runInstaller(
+    installer: string,
+    env: NodeJS.ProcessEnv,
+    onProgress?: (pct: number, message: string) => void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('bash', [installer], { env });
+      const tail: string[] = [];
+      let buf = '';
+
+      const onData = (chunk: Buffer) => {
+        buf += chunk.toString();
+        let nl: number;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          tail.push(line);
+          if (tail.length > 40) tail.shift();
+          const m = line.match(/^PROGRESS:(\d{1,3}):(.*)$/);
+          if (m && onProgress) {
+            const pct = Math.max(0, Math.min(100, parseInt(m[1], 10)));
+            onProgress(pct, m[2].trim());
+          }
+        }
+      };
+
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        reject(new Error('Installer timed out after 45 minutes'));
+      }, 45 * 60 * 1000);
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Installer exited with code ${code}\n${tail.join('\n')}`));
+        }
+      });
+    });
   }
 
   /**

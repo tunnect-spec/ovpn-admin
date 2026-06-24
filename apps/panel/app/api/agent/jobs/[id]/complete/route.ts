@@ -71,12 +71,16 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         attempts: { increment: 1 },
         result: body.success ? body.result : null,
         error: body.success ? null : body.error || 'Unknown error',
+        // Drive the progress bar cleanly to 100% on a successful install.
+        ...(body.success && job.type === 'NODE_INSTALL'
+          ? { progress: 100, progressMessage: 'Installation complete' }
+          : {}),
       },
     });
 
     // If a NODE_INSTALL finished successfully, record the OpenVPN version + XOR
-    // mask the agent reported and stamp installedAt, so the panel reflects the
-    // real installed state (the next heartbeat flips status to HEALTHY).
+    // mask the agent reported, stamp installedAt, and flip the node to HEALTHY
+    // immediately so the UI doesn't sit at "Installing" until the next heartbeat.
     if (body.success && job.type === 'NODE_INSTALL') {
       const result = (body.result ?? {}) as { version?: string; xorMask?: string };
       const existing = await prisma.node.findUnique({
@@ -86,6 +90,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       await prisma.node.update({
         where: { id: nodeId },
         data: {
+          status: 'HEALTHY',
           openvpnVersion: result.version ?? undefined,
           xorMask: result.xorMask ?? undefined,
           installedAt: existing?.installedAt ?? new Date(),

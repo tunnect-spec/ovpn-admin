@@ -252,8 +252,11 @@ export class Agent {
             }
           }
           // Idempotent: fast reconfigure if already installed, full build on a
-          // fresh node (keeps restored PKI). Applies XOR/DNS/domain/MTU options.
-          result = await this.ops.installOpenVpn(job.payload || {});
+          // fresh node (keeps restored PKI). Applies the chosen options and
+          // streams real install progress to the panel as it runs.
+          result = await this.ops.installOpenVpn(job.payload || {}, (pct, message) => {
+            void this.reportProgress(job.id, pct, message);
+          });
           await this.uploadBackup(); // capture the freshly-installed PKI on the panel
           break;
 
@@ -311,6 +314,20 @@ export class Agent {
    * backoff (1s, 2s, 4s, ...). After all attempts are exhausted we log clearly
    * and give up without crashing the agent.
    */
+  /**
+   * Report install progress (best-effort). Posted while a NODE_INSTALL job is
+   * RUNNING so the panel's progress bar reflects the real stage. Never let a
+   * failed progress post disrupt the install.
+   */
+  private async reportProgress(jobId: string, progress: number, message: string): Promise<void> {
+    try {
+      await this.api.post(`/api/agent/jobs/${jobId}/progress`, { progress, message });
+      console.log(`  → ${progress}% ${message}`);
+    } catch {
+      // ignore — progress is non-critical
+    }
+  }
+
   private async reportJobCompletion(
     jobId: string,
     success: boolean,
