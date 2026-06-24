@@ -105,10 +105,13 @@ export const DELETE = withAuth(async (request: NextRequest, payload, { params }:
     // Note: We DO NOT add this to jobQueue anymore.
     // The Agent will pick up the PENDING job via its heartbeat loop.
 
-    // Mark client as revoked (will be confirmed by job completion)
+    // Mark client as revoked (the agent job confirms the on-node CRL update).
+    // Stamp revokedAt here: once status flips to REVOKED the job-completion
+    // handler no longer touches it (it only acts on ACTIVE clients), so this is
+    // the one place that records when the revocation happened.
     await prisma.vpnClient.update({
       where: { id },
-      data: { status: 'REVOKED' },
+      data: { status: 'REVOKED', revokedAt: new Date() },
     });
 
     // Expire artifacts
