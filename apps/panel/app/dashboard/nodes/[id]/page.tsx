@@ -7,6 +7,7 @@ import { Copy, Plus, Trash2, MoveRight } from 'lucide-react';
 
 import { InstallNodeDialog } from './InstallNodeDialog';
 import { apiFetch, ApiError, UnauthorizedError } from '@/components/use-api';
+import { copyToClipboard } from '@/lib/utils';
 import { toast } from '@/components/ui/use-toast';
 import { confirm } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
@@ -256,8 +257,11 @@ export default function NodeDetailsPage() {
   const migrateCommand = `curl -fsSL ${origin}/api/agent/install.sh | AGENT_TOKEN=${migrateToken} PANEL_URL=${origin} bash`;
 
   const copyMigrate = async () => {
-    await navigator.clipboard.writeText(migrateCommand);
-    toast({ variant: 'success', title: 'Command copied' });
+    if (await copyToClipboard(migrateCommand)) {
+      toast({ variant: 'success', title: 'Command copied' });
+    } else {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Select the command and copy it manually.' });
+    }
   };
 
   if (loading && !node) {

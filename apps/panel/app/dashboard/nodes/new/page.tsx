@@ -11,6 +11,7 @@ import { Copy, Check, Terminal, Shield, ArrowLeft, Plus } from 'lucide-react';
 import { apiFetch, UnauthorizedError } from '@/components/use-api';
 import { toast } from '@/components/ui/use-toast';
 import { Spinner } from '@/components/ui/spinner';
+import { copyToClipboard } from '@/lib/utils';
 
 export default function NewNodePage() {
   const router = useRouter();
@@ -53,14 +54,20 @@ export default function NewNodePage() {
   };
 
   const copyToken = async () => {
-    await navigator.clipboard.writeText(result!.registrationToken);
+    if (!(await copyToClipboard(result!.registrationToken))) {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Select the token and copy it manually.' });
+      return;
+    }
     setCopiedToken(true);
     toast({ variant: 'success', title: 'Registration token copied' });
     setTimeout(() => setCopiedToken(false), 2000);
   };
 
   const copyCommand = async () => {
-    await navigator.clipboard.writeText(result!.installCommand);
+    if (!(await copyToClipboard(result!.installCommand))) {
+      toast({ variant: 'destructive', title: 'Copy failed', description: 'Select the command and copy it manually.' });
+      return;
+    }
     setCopiedCommand(true);
     toast({ variant: 'success', title: 'Install command copied' });
     setTimeout(() => setCopiedCommand(false), 2000);
