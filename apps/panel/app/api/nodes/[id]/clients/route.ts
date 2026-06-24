@@ -44,6 +44,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
         fingerprint: c.fingerprint,
         createdAt: c.createdAt.toISOString(),
         revokedAt: c.revokedAt?.toISOString() ?? null,
+        disabledAt: c.disabledAt?.toISOString() ?? null,
         expiresAt: c.expiresAt?.toISOString() ?? null,
         lastSeenAt: c.lastSeenAt?.toISOString() ?? null,
         bytesUp: Number(c.bytesUp),

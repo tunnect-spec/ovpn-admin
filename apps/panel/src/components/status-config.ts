@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Loader2,
   Ban,
+  PauseCircle,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -84,7 +85,7 @@ export function getNodeStatus(status: string): StatusEntry {
 // Client statuses
 // ---------------------------------------------------------------------------
 
-export type ClientStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+export type ClientStatus = 'ACTIVE' | 'DISABLED' | 'REVOKED' | 'EXPIRED';
 
 export const CLIENT_STATUS: Record<ClientStatus, StatusEntry> = {
   ACTIVE: {
@@ -93,6 +94,13 @@ export const CLIENT_STATUS: Record<ClientStatus, StatusEntry> = {
     icon: CheckCircle2,
     dot: 'bg-emerald-500',
     text: 'text-success',
+  },
+  DISABLED: {
+    variant: 'warning',
+    label: 'Disabled',
+    icon: PauseCircle,
+    dot: 'bg-yellow-500',
+    text: 'text-yellow-400',
   },
   REVOKED: {
     variant: 'destructive',

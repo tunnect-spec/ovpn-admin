@@ -169,6 +169,21 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       }
     }
 
+    // If an enable/disable FAILED on the node, revert the panel's optimistic
+    // status so it never claims a client is blocked (or active) when it isn't.
+    if (!body.success && (job.type === 'CLIENT_DISABLE' || job.type === 'CLIENT_ENABLE')) {
+      const clientName = (job.payload as any)?.clientName;
+      if (clientName) {
+        await prisma.vpnClient.updateMany({
+          where: { nodeId, name: clientName, status: { in: ['ACTIVE', 'DISABLED'] } },
+          data:
+            job.type === 'CLIENT_DISABLE'
+              ? { status: 'ACTIVE', disabledAt: null } // disable failed → still active
+              : { status: 'DISABLED' }, // enable failed → still disabled
+        });
+      }
+    }
+
     // Audit log
     await prisma.auditLog.create({
       data: {

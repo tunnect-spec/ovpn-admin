@@ -114,6 +114,7 @@ model VpnClient {
 
   createdAt  DateTime   @default(now())
   revokedAt  DateTime?
+  disabledAt DateTime?
   expiresAt  DateTime?
   lastSeenAt DateTime?
 
@@ -135,6 +136,7 @@ model VpnClient {
 
 enum ClientStatus {
   ACTIVE
+  DISABLED   // temporarily blocked via CCD `disable` — reversible (cert still valid)
   REVOKED
   EXPIRED
 }
@@ -201,6 +203,8 @@ enum JobType {
   NODE_INSTALL
   CLIENT_CREATE
   CLIENT_REVOKE
+  CLIENT_DISABLE
+  CLIENT_ENABLE
   NODE_SYNC
   HEALTH_CHECK
 }

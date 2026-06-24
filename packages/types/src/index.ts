@@ -45,7 +45,7 @@ export interface VpnClient {
   lastSeenAt: Date | null;
 }
 
-export type ClientStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+export type ClientStatus = 'ACTIVE' | 'DISABLED' | 'REVOKED' | 'EXPIRED';
 
 export interface ClientArtifact {
   id: string;

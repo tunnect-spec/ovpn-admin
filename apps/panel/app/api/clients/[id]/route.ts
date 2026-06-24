@@ -56,7 +56,9 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
   }
 });
 
-// DELETE /api/clients/:id - Revoke client
+// DELETE /api/clients/:id - Permanently delete a client.
+// Revokes the certificate on the node (so the .ovpn can never reconnect, even
+// though the panel record is gone) and removes the client + its artifacts.
 export const DELETE = withAuth(async (request: NextRequest, payload, { params }: { params: Params }) => {
   try {
     const { id } = await params;
@@ -73,57 +75,28 @@ export const DELETE = withAuth(async (request: NextRequest, payload, { params }:
       );
     }
 
-    if (client.status === 'REVOKED') {
-      return NextResponse.json(
-        { error: 'ALREADY_REVOKED', message: 'Client already revoked' },
-        { status: 409 },
-      );
-    }
-
-    if (client.node.status !== 'HEALTHY') {
-      return NextResponse.json(
-        { error: 'AGENT_OFFLINE', message: 'Node is not healthy. Cannot revoke client.' },
-        { status: 503 },
-      );
-    }
-
-    // Create revoke job
-    const job = await prisma.job.create({
-      data: {
-        type: 'CLIENT_REVOKE',
-        status: 'PENDING',
-        priority: 8,
-        nodeId: client.nodeId,
-        payload: {
-          clientId: client.id,
-          clientName: client.name,
+    // Queue a revoke on the node unless it's already revoked. The agent picks
+    // this up via its heartbeat; the job carries the client NAME, so it still
+    // works after we delete the DB row below. revoke-user.sh adds the cert to
+    // the CRL and clears any CCD/disable override + frees the name for reuse.
+    if (client.status !== 'REVOKED') {
+      await prisma.job.create({
+        data: {
+          type: 'CLIENT_REVOKE',
+          status: 'PENDING',
+          priority: 8,
+          nodeId: client.nodeId,
+          payload: { clientId: client.id, clientName: client.name },
+          maxAttempts: 3,
         },
-        maxAttempts: 3,
-      },
-    });
+      });
+    }
 
-    // Note: We DO NOT add this to jobQueue anymore.
-    // The Agent will pick up the PENDING job via its heartbeat loop.
-
-    // Mark client as revoked (the agent job confirms the on-node CRL update).
-    // Stamp revokedAt here: once status flips to REVOKED the job-completion
-    // handler no longer touches it (it only acts on ACTIVE clients), so this is
-    // the one place that records when the revocation happened.
-    await prisma.vpnClient.update({
-      where: { id },
-      data: { status: 'REVOKED', revokedAt: new Date() },
-    });
-
-    // Expire artifacts
-    await prisma.clientArtifact.updateMany({
-      where: { clientId: id },
-      data: { expiresAt: new Date() },
-    });
-
-    // Audit log
+    // Audit before deletion. AuditLog.clientId is SET NULL on delete, so the
+    // record survives (the client name is preserved in details).
     await prisma.auditLog.create({
       data: {
-        action: 'client.revoked',
+        action: 'client.deleted',
         nodeId: client.nodeId,
         clientId: client.id,
         details: { clientName: client.name },
@@ -132,17 +105,14 @@ export const DELETE = withAuth(async (request: NextRequest, payload, { params }:
       },
     });
 
-    return NextResponse.json({
-      job: {
-        id: job.id,
-        type: job.type,
-        status: job.status,
-      },
-    });
+    // Permanently remove the client and its artifacts (artifacts cascade).
+    await prisma.vpnClient.delete({ where: { id } });
+
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Revoke client error:', error);
+    console.error('Delete client error:', error);
     return NextResponse.json(
-      { error: 'INTERNAL_ERROR', message: 'Failed to revoke client' },
+      { error: 'INTERNAL_ERROR', message: 'Failed to delete client' },
       { status: 500 },
     );
   }

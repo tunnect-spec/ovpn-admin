@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, Power, PowerOff, Trash2, Download } from 'lucide-react';
 
 import { apiFetch, apiFetchRaw, UnauthorizedError } from '@/components/use-api';
 import { toast } from '@/components/ui/use-toast';
@@ -17,10 +17,11 @@ import { getClientStatus } from '@/components/status-config';
 interface Client {
   id: string;
   name: string;
-  status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+  status: 'ACTIVE' | 'DISABLED' | 'REVOKED' | 'EXPIRED';
   fingerprint: string;
   createdAt: string;
   revokedAt: string | null;
+  disabledAt?: string | null;
   bytesUp: number;
   bytesDown: number;
   online: boolean;
@@ -71,26 +72,55 @@ export default function NodeClientsPage() {
     load();
   }, [load]);
 
-  const handleRevoke = async (clientId: string, clientName: string) => {
-    const ok = await confirm({
-      title: `Revoke "${clientName}"?`,
-      description: 'The client certificate will be revoked on the node and can no longer connect. This cannot be undone.',
-      confirmLabel: 'Revoke client',
-      destructive: true,
-    });
-    if (!ok) return;
+  const [busyId, setBusyId] = useState<string | null>(null);
 
+  const handleToggle = async (client: Client) => {
+    const enabling = client.status === 'DISABLED';
+    setBusyId(client.id);
     try {
-      await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
-      toast({ variant: 'success', title: 'Client revoked', description: clientName });
+      await apiFetch(`/api/clients/${client.id}/${enabling ? 'enable' : 'disable'}`, { method: 'POST' });
+      toast({
+        variant: 'success',
+        title: enabling ? 'Client enabled' : 'Client disabled',
+        description: client.name,
+      });
       load();
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         router.push('/login');
         return;
       }
-      const message = err instanceof Error ? err.message : 'Failed to revoke client';
-      toast({ variant: 'destructive', title: 'Failed to revoke client', description: message });
+      const message = err instanceof Error ? err.message : 'Action failed';
+      toast({ variant: 'destructive', title: enabling ? 'Failed to enable' : 'Failed to disable', description: message });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDelete = async (clientId: string, clientName: string) => {
+    const ok = await confirm({
+      title: `Delete "${clientName}" permanently?`,
+      description:
+        'The certificate is revoked on the node (its .ovpn can never reconnect) and the client is removed from the panel. This cannot be undone.',
+      confirmLabel: 'Delete permanently',
+      destructive: true,
+    });
+    if (!ok) return;
+
+    setBusyId(clientId);
+    try {
+      await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+      toast({ variant: 'success', title: 'Client deleted', description: clientName });
+      load();
+    } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        router.push('/login');
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Failed to delete client';
+      toast({ variant: 'destructive', title: 'Failed to delete client', description: message });
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -191,24 +221,45 @@ export default function NodeClientsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="flex justify-end gap-2">
-                          {client.status === 'ACTIVE' && client.artifactCount > 0 && (
+                          {(client.status === 'ACTIVE' || client.status === 'DISABLED') && client.artifactCount > 0 && (
                             <Button
                               variant="outline"
                               size="sm"
+                              className="gap-1.5"
                               onClick={() => handleDownload(client.id, client.name)}
                               disabled={downloadingId === client.id}
                             >
+                              <Download className="h-4 w-4" />
                               {downloadingId === client.id ? 'Downloading…' : 'Download'}
                             </Button>
                           )}
-                          {client.status === 'ACTIVE' && (
+                          {(client.status === 'ACTIVE' || client.status === 'DISABLED') && (
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleRevoke(client.id, client.name)}
+                              className="gap-1.5"
+                              onClick={() => handleToggle(client)}
+                              disabled={busyId === client.id}
+                              title={client.status === 'DISABLED' ? 'Enable this client' : 'Temporarily block this client'}
+                            >
+                              {client.status === 'DISABLED' ? (
+                                <><Power className="h-4 w-4 text-emerald-400" />Enable</>
+                              ) : (
+                                <><PowerOff className="h-4 w-4 text-yellow-400" />Disable</>
+                              )}
+                            </Button>
+                          )}
+                          {client.status !== 'REVOKED' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`Delete ${client.name}`}
+                              title="Delete permanently"
+                              onClick={() => handleDelete(client.id, client.name)}
+                              disabled={busyId === client.id}
                               className="text-destructive hover:text-destructive hover:bg-destructive/10"
                             >
-                              Revoke
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           )}
                         </div>

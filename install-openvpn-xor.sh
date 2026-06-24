@@ -155,6 +155,10 @@ DISCONNECT
 }
 
 write_server_conf() {
+  # client-config-dir holds per-client overrides; a file named after the CN
+  # containing `disable` blocks that client (reversible enable/disable). The
+  # unix management socket lets the agent kill a single client's live session.
+  mkdir -p "$OVPN_DIR/ccd"
   {
     cat <<EOF
 port $PORT
@@ -177,6 +181,9 @@ tls-groups secp256r1
 
 tls-crypt $OVPN_DIR/tls-crypt.key
 crl-verify $OVPN_DIR/crl.pem
+
+client-config-dir $OVPN_DIR/ccd
+management $OVPN_DIR/mgmt.sock unix
 
 data-ciphers $(render_cipher_list)
 data-ciphers-fallback $CIPHER
@@ -704,6 +711,13 @@ chmod 644 "$OVPN_DIR/crl.pem"
 
 rm -f "$CLIENTS_DIR/$USER_NAME.ovpn"
 rm -f "$EXPORT_DIR/$USER_NAME.ovpn" 2>/dev/null || true
+# Clear any disable override and free the CN for re-issue. The revoked serial
+# stays in the CRL (the old cert is permanently blocked); EasyRSA's index keeps
+# unique_subject=no so the same name can be issued a fresh cert later.
+rm -f "$OVPN_DIR/ccd/$USER_NAME" 2>/dev/null || true
+rm -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" \
+      "$EASYRSA_DIR/pki/private/$USER_NAME.key" \
+      "$EASYRSA_DIR/pki/reqs/$USER_NAME.req" 2>/dev/null || true
 
 systemctl restart openvpn-xor
 

@@ -213,6 +213,18 @@ export class Agent {
           await this.uploadBackup(); // CRL changed -> refresh the panel backup
           break;
 
+        case 'CLIENT_DISABLE':
+        case 'client-disable':
+          result = await this.ops.disableClient(job.payload?.clientName || job.payload?.name);
+          await this.uploadBackup(); // CCD state changed -> refresh the panel backup
+          break;
+
+        case 'CLIENT_ENABLE':
+        case 'client-enable':
+          result = await this.ops.enableClient(job.payload?.clientName || job.payload?.name);
+          await this.uploadBackup();
+          break;
+
         case 'NODE_SYNC':
         case 'node-sync':
           result = await this.ops.sync();

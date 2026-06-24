@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { existsSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import { connect as netConnect } from 'net';
 import path from 'path';
 
 const exec = promisify(execFile);
@@ -30,6 +31,11 @@ function assertValidClientName(name: string): void {
 // Paths from the install script
 const OVPN_DIR = '/etc/openvpn/xor';
 const ADMIN_DIR = '/root/ovpn-xor-admin';
+// Per-client override dir (a file named after the CN containing `disable` blocks
+// that client) and the OpenVPN unix management socket (used to kick live sessions).
+const CCD_DIR = `${OVPN_DIR}/ccd`;
+const MGMT_SOCK = `${OVPN_DIR}/mgmt.sock`;
+const SERVER_CONF = `${OVPN_DIR}/server.conf`;
 // The XOR installer symlinks the patched binary as `openvpn-xor`. Prefer that,
 // falling back to a plain `openvpn` for other layouts. This MUST be resolved per
 // call, not once at module load: the agent typically starts BEFORE OpenVPN is
@@ -321,6 +327,86 @@ export class OpenVpnOps {
       console.error('Failed to revoke client:', error);
       throw new Error(`Client revocation failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Ensure server.conf has client-config-dir + a management socket. Installs
+   * created before this feature lack them; add them once and restart so
+   * enable/disable and live session-kill work. No-op (no restart) once present.
+   */
+  private async ensureCcdAndMgmt(): Promise<void> {
+    try {
+      mkdirSync(CCD_DIR, { recursive: true });
+      if (!existsSync(SERVER_CONF)) return;
+      let conf = readFileSync(SERVER_CONF, 'utf-8');
+      let changed = false;
+      if (!/^\s*client-config-dir\s/m.test(conf)) {
+        conf += `\nclient-config-dir ${CCD_DIR}\n`;
+        changed = true;
+      }
+      if (!/^\s*management\s/m.test(conf)) {
+        conf += `management ${MGMT_SOCK} unix\n`;
+        changed = true;
+      }
+      if (changed) {
+        writeFileSync(SERVER_CONF, conf);
+        try {
+          await exec('systemctl', ['restart', 'openvpn-xor'], { timeout: 20000 });
+        } catch {
+          /* best effort — the CCD file still takes effect on the next (re)connect */
+        }
+      }
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /** Send one command to the OpenVPN unix management socket (best-effort). */
+  private async mgmtCommand(command: string): Promise<void> {
+    if (!existsSync(MGMT_SOCK)) return;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const sock = netConnect(MGMT_SOCK);
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        try { sock.destroy(); } catch { /* ignore */ }
+        resolve();
+      };
+      const timer = setTimeout(done, 3000);
+      sock.on('connect', () => sock.write(`${command}\nquit\n`));
+      // Give OpenVPN a moment to act on the command, then close.
+      sock.on('data', () => setTimeout(() => { clearTimeout(timer); done(); }, 200));
+      sock.on('error', () => { clearTimeout(timer); done(); });
+      sock.on('close', () => { clearTimeout(timer); done(); });
+    });
+  }
+
+  /**
+   * Disable a client (reversible): write a CCD `disable` file for the CN and
+   * kick any live session. The certificate stays valid, so the client can be
+   * re-enabled later with enableClient().
+   */
+  async disableClient(name: string): Promise<{ success: true }> {
+    assertValidClientName(name);
+    await this.ensureCcdAndMgmt();
+    mkdirSync(CCD_DIR, { recursive: true });
+    writeFileSync(path.join(CCD_DIR, name), 'disable\n');
+    // CCD is only re-read on (re)connect/renegotiation, so disconnect the live
+    // session now to make the block take effect immediately.
+    await this.mgmtCommand(`kill ${name}`);
+    console.log(`  ⛔ Client "${name}" disabled`);
+    return { success: true };
+  }
+
+  /** Re-enable a previously disabled client by removing its CCD `disable` file. */
+  async enableClient(name: string): Promise<{ success: true }> {
+    assertValidClientName(name);
+    await this.ensureCcdAndMgmt();
+    const f = path.join(CCD_DIR, name);
+    if (existsSync(f)) unlinkSync(f);
+    console.log(`  ✅ Client "${name}" enabled`);
+    return { success: true };
   }
 
   /**
