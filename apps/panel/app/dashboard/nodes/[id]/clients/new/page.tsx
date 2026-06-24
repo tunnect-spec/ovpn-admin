@@ -13,12 +13,18 @@ import { Spinner } from '@/components/ui/spinner';
 import { TERMINAL_JOB_STATUSES } from '@/components/status-config';
 
 const EXPIRY_OPTIONS = [
-  { value: '30', label: '30 days' },
-  { value: '90', label: '90 days' },
+  { value: '30', label: '1 month' },
+  { value: '90', label: '3 months' },
+  { value: '180', label: '6 months' },
   { value: '365', label: '1 year' },
   { value: '730', label: '2 years' },
   { value: 'never', label: 'Never' },
 ] as const;
+
+/** Format a Date as e.g. "24 Jul 2026". */
+function formatDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 export default function NewClientPage() {
   const params = useParams();
@@ -168,6 +174,17 @@ export default function NewClientPage() {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            {expiresIn === 'never' ? (
+              <p className="text-xs text-muted-foreground">This configuration will never expire.</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Valid until{' '}
+                <span className="font-medium text-foreground">
+                  {formatDate(new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000))}
+                </span>{' '}
+                — the config stops connecting after that date.
+              </p>
+            )}
           </div>
 
           <div className="bg-muted text-muted-foreground border border-border rounded p-4 text-sm">

@@ -203,7 +203,10 @@ export class Agent {
       switch (job.type) {
         case 'CLIENT_CREATE':
         case 'client-create':
-          result = await this.ops.createClient(job.payload?.clientName || job.payload?.name);
+          result = await this.ops.createClient(
+            job.payload?.clientName || job.payload?.name,
+            job.payload?.expiresInDays,
+          );
           await this.uploadBackup(); // PKI changed -> refresh the panel backup
           break;
 

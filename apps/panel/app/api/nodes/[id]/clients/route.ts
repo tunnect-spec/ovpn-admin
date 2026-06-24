@@ -123,6 +123,9 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
         payload: {
           clientId: client.id,
           clientName: input.name,
+          // Issue the cert with the chosen validity so it genuinely stops working
+          // on the expiry date (not just a panel label). null = no expiry.
+          expiresInDays: input.expiresIn ?? null,
         },
         maxAttempts: 3,
       },

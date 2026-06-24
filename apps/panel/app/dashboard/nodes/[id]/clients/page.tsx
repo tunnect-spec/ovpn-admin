@@ -22,6 +22,7 @@ interface Client {
   createdAt: string;
   revokedAt: string | null;
   disabledAt?: string | null;
+  expiresAt?: string | null;
   bytesUp: number;
   bytesDown: number;
   online: boolean;
@@ -29,6 +30,34 @@ interface Client {
 }
 
 const TH = 'px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase';
+
+/** Expiry cell: shows the date the config stops working + a relative hint. */
+function ExpiryCell({ expiresAt, status }: { expiresAt?: string | null; status: string }) {
+  if (!expiresAt) return <span className="text-muted-foreground">Never</span>;
+  const d = new Date(expiresAt);
+  const ms = d.getTime() - Date.now();
+  const days = Math.ceil(ms / (24 * 60 * 60 * 1000));
+  const expired = ms <= 0 || status === 'EXPIRED';
+  const dateStr = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  let rel: string;
+  let cls: string;
+  if (expired) {
+    rel = 'Expired — stopped working';
+    cls = 'text-destructive';
+  } else if (days <= 7) {
+    rel = days <= 1 ? 'expires within a day' : `expires in ${days} days`;
+    cls = 'text-yellow-400';
+  } else {
+    rel = `in ${days} days`;
+    cls = 'text-muted-foreground';
+  }
+  return (
+    <div>
+      <div className={expired ? 'text-muted-foreground line-through' : 'text-foreground'}>{dateStr}</div>
+      <div className={`text-xs ${cls}`}>{rel}</div>
+    </div>
+  );
+}
 
 /** Human-readable bytes (1024-based): 0 B, 12.3 MB, 4.7 GB … */
 function formatBytes(bytes: number): string {
@@ -187,6 +216,7 @@ export default function NodeClientsPage() {
                   <th scope="col" className={TH}>Status</th>
                   <th scope="col" className={TH}>Traffic (↑ up / ↓ down)</th>
                   <th scope="col" className={TH}>Created</th>
+                  <th scope="col" className={TH}>Expires</th>
                   <th scope="col" className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
@@ -218,6 +248,9 @@ export default function NodeClientsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                         {new Date(client.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        <ExpiryCell expiresAt={client.expiresAt} status={client.status} />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right">
                         <div className="flex justify-end gap-2">

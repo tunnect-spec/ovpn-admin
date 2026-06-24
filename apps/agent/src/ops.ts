@@ -232,9 +232,12 @@ export class OpenVpnOps {
   }
 
   /**
-   * Create a new VPN client
+   * Create a new VPN client. `expiresInDays`, when given, is passed to the
+   * installer so the certificate is issued with that exact validity — the
+   * config then genuinely stops authenticating after the expiry date (OpenVPN
+   * rejects an expired cert), not just in the panel.
    */
-  async createClient(name: string): Promise<CreateClientResult> {
+  async createClient(name: string, expiresInDays?: number | null): Promise<CreateClientResult> {
     assertValidClientName(name);
 
     const certPath = path.join(OVPN_DIR, 'easy-rsa', 'pki', 'issued', `${name}.crt`);
@@ -249,11 +252,14 @@ export class OpenVpnOps {
         return await this.buildClientResult(name, ovpnPath, certPath);
       }
 
-      // Run the add-user script to create the client.
+      // Run the add-user script to create the client. CERT_EXPIRE_DAYS (when set)
+      // sets the certificate validity; add-user.sh defaults it otherwise.
+      const days =
+        typeof expiresInDays === 'number' && expiresInDays > 0 ? String(Math.floor(expiresInDays)) : '';
       await exec(
         path.join(ADMIN_DIR, 'add-user.sh'),
         [name],
-        { timeout: 60000 }
+        { timeout: 60000, env: { ...process.env, CERT_EXPIRE_DAYS: days } }
       );
 
       return await this.buildClientResult(name, ovpnPath, certPath);

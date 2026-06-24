@@ -295,7 +295,12 @@ if [[ -f "$EASYRSA_DIR/pki/issued/$USER_NAME.crt" ]]; then
   exit 1
 fi
 
-EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass
+# Certificate validity. CERT_EXPIRE_DAYS (passed by the agent for a client with a
+# chosen expiry) makes the cert genuinely stop authenticating on that date.
+# Default to 3650 days (≈ the CA lifetime) when no expiry was selected.
+CERT_EXPIRE_DAYS="${CERT_EXPIRE_DAYS:-}"
+[[ -n "$CERT_EXPIRE_DAYS" ]] || CERT_EXPIRE_DAYS=3650
+EASYRSA_CERT_EXPIRE="$CERT_EXPIRE_DAYS" EASYRSA_BATCH=1 ./easyrsa build-client-full "$USER_NAME" nopass
 
 CA="$(cat "$EASYRSA_DIR/pki/ca.crt")"
 CERT="$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$EASYRSA_DIR/pki/issued/$USER_NAME.crt")"
