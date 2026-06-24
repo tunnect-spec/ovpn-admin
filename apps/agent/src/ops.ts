@@ -255,7 +255,9 @@ export class OpenVpnOps {
         diskTotalGb,
         uptime,
         loadAvg,
-        connectedClients: await this.getConnectedClientCount(),
+        // connectedClients is intentionally omitted — the heartbeat reports it
+        // from getStatus() (status.connectedClients); recomputing here would be a
+        // redundant status-file read every tick.
       };
     } catch (error) {
       console.error('Failed to get details:', error);

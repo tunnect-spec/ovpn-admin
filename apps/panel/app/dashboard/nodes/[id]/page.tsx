@@ -292,6 +292,17 @@ export default function NodeDetailsPage() {
   const awaitingInstall = !isInstalled && !installActive;
   const canAddClient = node.status === 'HEALTHY';
 
+  // Derive the dialog's DNS selection from the node's stored dnsServers so a
+  // reconfigure pre-fills it (otherwise it silently resets DNS to "standard").
+  const ds = node.dnsServers ?? [];
+  const dnsMode: 'standard' | 'empty' | 'custom' =
+    ds.length === 0
+      ? 'empty'
+      : ds.length === 2 && ds.includes('8.8.8.8') && ds.includes('1.1.1.1')
+        ? 'standard'
+        : 'custom';
+  const customDns = dnsMode === 'custom' ? ds.join(', ') : undefined;
+
   return (
     <div className="space-y-6">
       {showInstallDialog && (
@@ -308,6 +319,8 @@ export default function NodeDetailsPage() {
             clientToClient: node.clientToClient ?? undefined,
             duplicateCn: node.duplicateCn ?? undefined,
             domain: node.domain ?? undefined,
+            dnsMode,
+            customDns,
             mtu: node.mtu ?? undefined,
             mssfix: node.mssfix ?? undefined,
           }}

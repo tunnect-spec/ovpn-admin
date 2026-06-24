@@ -21,7 +21,9 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
       prisma.node.count(),
       prisma.node.count({ where: { status: 'HEALTHY' } }),
       prisma.node.count({ where: { status: 'UNHEALTHY' } }),
-      prisma.node.count({ where: { status: 'PENDING' } }),
+      // "Pending" covers both not-yet-connected (PENDING) and being-provisioned
+      // (PROVISIONING); only true ERROR nodes land in the error bucket below.
+      prisma.node.count({ where: { status: { in: ['PENDING', 'PROVISIONING'] } } }),
       // Clients
       prisma.vpnClient.count(),
       prisma.vpnClient.count({ where: { status: 'ACTIVE' } }),

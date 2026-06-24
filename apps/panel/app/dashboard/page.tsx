@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Server, Users, Briefcase, ArrowRight, Activity, TrendingUp, Shield } from 'lucide-react';
+import { Plus, Server, Users, Briefcase, ArrowRight, Activity, TrendingUp, Shield, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 
 import { apiFetch, UnauthorizedError } from '@/components/use-api';
@@ -250,23 +250,40 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* System Status Banner */}
-      <Card className="bg-card border-emerald-500/20">
-        <CardContent className="py-6">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
-              <Shield className="h-6 w-6 text-emerald-500" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold">All Systems Operational</h3>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Your VPN infrastructure is running smoothly. {stats.nodes.healthy} of {stats.nodes.total} nodes are healthy.
-              </p>
-            </div>
-            <TrendingUp className="h-8 w-8 text-emerald-400" />
-          </div>
-        </CardContent>
-      </Card>
+      {/* System Status Banner — reflects real node health. */}
+      {(() => {
+        const degraded = stats.nodes.unhealthy + stats.nodes.error;
+        const provisioning = stats.nodes.pending;
+        const ok = degraded === 0;
+        return (
+          <Card className={`bg-card ${ok ? 'border-emerald-500/20' : 'border-amber-500/30'}`}>
+            <CardContent className="py-6">
+              <div className="flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${ok ? 'bg-emerald-500/20' : 'bg-amber-500/20'}`}>
+                  {ok ? <Shield className="h-6 w-6 text-emerald-500" /> : <AlertTriangle className="h-6 w-6 text-amber-500" />}
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold">
+                    {stats.nodes.total === 0
+                      ? 'No nodes yet'
+                      : ok
+                        ? 'All systems operational'
+                        : `${degraded} node${degraded === 1 ? '' : 's'} need attention`}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    {stats.nodes.total === 0
+                      ? 'Add your first VPN node to get started.'
+                      : `${stats.nodes.healthy} of ${stats.nodes.total} nodes healthy` +
+                        (degraded ? ` · ${degraded} unhealthy/error` : '') +
+                        (provisioning ? ` · ${provisioning} provisioning` : '') + '.'}
+                  </p>
+                </div>
+                {ok ? <TrendingUp className="h-8 w-8 text-emerald-400" /> : <AlertTriangle className="h-8 w-8 text-amber-400" />}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
     </div>
   );
 }

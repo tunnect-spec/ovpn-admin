@@ -80,8 +80,23 @@ export default function NewClientPage() {
 
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Don't poll forever if the agent never picks up the job (offline node /
+    // stuck queue) — give up after a few minutes and re-enable the form.
+    const deadline = Date.now() + 4 * 60 * 1000;
+
+    const giveUp = () => {
+      setLoading(false);
+      setJobId(null);
+      const message = 'The node did not process this client in time. Check the node is online, then try again.';
+      setError(message);
+      toast({ variant: 'destructive', title: 'Client creation timed out', description: message });
+    };
 
     const poll = async () => {
+      if (Date.now() > deadline) {
+        if (mountedRef.current) giveUp();
+        return;
+      }
       try {
         const data = await apiFetch<{ job: { status: string; error: string | null } }>(`/api/jobs/${jobId}`, {
           signal: controller.signal,
@@ -97,6 +112,7 @@ export default function NewClientPage() {
         }
         if (TERMINAL_JOB_STATUSES.has(data.job.status)) {
           setLoading(false);
+          setJobId(null);
           const message = data.job.error || 'Client creation did not complete.';
           setError(message);
           toast({ variant: 'destructive', title: 'Client creation failed', description: message });

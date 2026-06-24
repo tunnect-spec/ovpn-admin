@@ -104,18 +104,12 @@ export async function POST(request: NextRequest, { params }: { params: Params })
       const clientData = result.client || {};
       const { name, fingerprint, ovpnContent } = clientData;
 
-      if (!name) {
-        console.error('Client name missing in job result');
-        return NextResponse.json({ success: true });
-      }
-
-      // Find client by name and node
-      const client = await prisma.vpnClient.findFirst({
-        where: {
-          nodeId,
-          name,
-        },
-      });
+      // Find client by name and node (skip gracefully if the agent didn't return
+      // a name — never short-circuit before the audit log below).
+      const client = name
+        ? await prisma.vpnClient.findFirst({ where: { nodeId, name } })
+        : null;
+      if (!name) console.error('Client name missing in job result');
 
       if (client) {
         // Update client with real fingerprint
@@ -150,18 +144,11 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     if (body.success && job.type === 'CLIENT_REVOKE') {
       const payload = job.payload as any;
       const clientName = payload?.clientName;
+      if (!clientName) console.error('Client name missing in job payload');
 
-      if (!clientName) {
-        console.error('Client name missing in job payload');
-        return NextResponse.json({ success: true });
-      }
-
-      const client = await prisma.vpnClient.findFirst({
-        where: {
-          nodeId,
-          name: clientName,
-        },
-      });
+      const client = clientName
+        ? await prisma.vpnClient.findFirst({ where: { nodeId, name: clientName } })
+        : null;
 
       if (client && client.status === 'ACTIVE') {
         await prisma.vpnClient.update({
