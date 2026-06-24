@@ -307,6 +307,12 @@ CERT="$(awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/' "$EASYRSA_DIR/pki/issued/$US
 KEY="$(cat "$EASYRSA_DIR/pki/private/$USER_NAME.key")"
 TLS="$(cat "$OVPN_DIR/tls-crypt.key")"
 
+# On a normal disconnect, tell the server immediately so the panel shows the
+# client offline at once instead of after the keepalive timeout. UDP-only
+# (the directive errors the parser on TCP).
+EXIT_NOTIFY=""
+[[ "${PROTO:-udp}" == "udp" ]] && EXIT_NOTIFY="explicit-exit-notify 2"
+
 cat > "$CLIENTS_DIR/$USER_NAME.ovpn" <<EOC
 client
 dev tun
@@ -330,6 +336,7 @@ tun-mtu $MTU
 mssfix $MSSFIX
 
 $SCRAMBLE_LINE
+$EXIT_NOTIFY
 
 verb 3
 
