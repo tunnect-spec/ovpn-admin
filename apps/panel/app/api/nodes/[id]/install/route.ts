@@ -21,16 +21,11 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
       );
     }
 
-    if (node.status === 'HEALTHY' || node.installedAt) {
-      return NextResponse.json(
-        { error: 'NODE_ALREADY_INSTALLED', message: 'Node already has OpenVPN installed' },
-        { status: 400 },
-      );
-    }
-
-    if (node.status === 'UNHEALTHY' || node.status === 'ERROR') {
-      // Allow retry install
-    }
+    // An already-installed node is reconfigured rather than rebuilt: the
+    // installer's fast path regenerates the config and restarts in seconds with
+    // the PKI untouched (existing clients keep working). So we DON'T reject an
+    // installed/HEALTHY node here — re-running install == applying new options.
+    const isReconfigure = node.status === 'HEALTHY' || !!node.installedAt;
 
     // Don't stack installs: if one is already queued or running for this node,
     // return the existing job instead of creating a duplicate. (Without this, a
@@ -95,7 +90,9 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
     await prisma.node.update({
       where: { id },
       data: {
-        status: 'PROVISIONING',
+        // A reconfigure keeps OpenVPN up (fast restart), so don't flip a HEALTHY
+        // node to PROVISIONING; a fresh install moves PENDING → PROVISIONING.
+        status: isReconfigure ? node.status : 'PROVISIONING',
         protocol: input.protocol,
         ovpnPort: input.port,
         obfuscation,
@@ -119,9 +116,9 @@ export const POST = withAuth(async (request: NextRequest, payload, { params }: {
     // Audit log
     await prisma.auditLog.create({
       data: {
-        action: 'node.install_triggered',
+        action: isReconfigure ? 'node.reconfigured' : 'node.install_triggered',
         nodeId: node.id,
-        details: { jobId: job.id },
+        details: { jobId: job.id, obfuscation, cipher: input.cipher, auth: input.auth, protocol: input.protocol, port: input.port },
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
       },

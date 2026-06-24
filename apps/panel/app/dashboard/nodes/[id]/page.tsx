@@ -271,6 +271,8 @@ export default function NodeDetailsPage() {
   const agentConnected =
     !!node.lastHeartbeatAt && Date.now() - new Date(node.lastHeartbeatAt).getTime() < 5 * 60 * 1000;
   const canInstall = !isInstalled;
+  // Reconfigure applies new options to an already-installed node (fast path).
+  const canReconfigure = isInstalled && agentConnected;
   // A node that's connected and not installed, with no install running yet.
   const awaitingInstall = !isInstalled && !installActive;
   const canAddClient = node.status === 'HEALTHY';
@@ -400,7 +402,7 @@ export default function NodeDetailsPage() {
         <div className="bg-card text-card-foreground border border-border rounded-lg p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Server Configuration</h3>
-            {canInstall && (
+            {canReconfigure && (
               <Button variant="outline" size="sm" onClick={() => setShowInstallDialog(true)}>Reconfigure</Button>
             )}
           </div>
