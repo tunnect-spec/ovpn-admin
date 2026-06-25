@@ -6,9 +6,10 @@ import { useState } from "react";
 import {
   LayoutDashboard,
   Server,
+  Users,
   Briefcase,
   FileText,
-  Users,
+  UserCog,
   LogOut,
   Menu,
 } from "lucide-react";
@@ -22,11 +23,12 @@ type Role = "SUPERADMIN" | "ADMIN" | "MANAGER";
 const baseNav = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Nodes", href: "/dashboard/nodes", icon: Server },
+  { name: "Clients", href: "/dashboard/clients", icon: Users },
   { name: "Jobs", href: "/dashboard/jobs", icon: Briefcase },
   { name: "Audit Logs", href: "/dashboard/audit", icon: FileText },
 ];
 // Full admins only.
-const adminNav = [{ name: "Managers", href: "/dashboard/managers", icon: Users }];
+const adminNav = [{ name: "Managers", href: "/dashboard/managers", icon: UserCog }];
 
 function navFor(role?: Role) {
   return role && role !== "MANAGER" ? [...baseNav, ...adminNav] : baseNav;

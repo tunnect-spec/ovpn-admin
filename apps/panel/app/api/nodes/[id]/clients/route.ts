@@ -40,6 +40,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
       orderBy: { createdAt: 'desc' },
       include: {
         _count: { select: { artifacts: true } },
+        createdBy: { select: { email: true } },
       },
     });
 
@@ -50,6 +51,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
         status: c.status,
         fingerprint: c.fingerprint,
         createdAt: c.createdAt.toISOString(),
+        createdByEmail: c.createdBy?.email ?? null,
         revokedAt: c.revokedAt?.toISOString() ?? null,
         disabledAt: c.disabledAt?.toISOString() ?? null,
         expiresAt: c.expiresAt?.toISOString() ?? null,
