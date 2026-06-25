@@ -136,6 +136,7 @@ test.describe('OVPN Admin Panel UI', () => {
     // Check for form elements
     const hasNameInput = await page.locator('input[name="name"]').count() > 0 ||
                          await page.locator('input[placeholder*="name" i]').count() > 0;
+    expect(hasNameInput).toBeTruthy();
 
     await page.screenshot({ path: 'test-screenshots/node-create.png' });
 

@@ -36,6 +36,16 @@ const eslintConfig = [
     settings: {
       react: { version: '19.0' },
     },
+    rules: {
+      // These two rules come from the experimental React Compiler lint set. They
+      // flag patterns that are correct and intentional here — resetting error
+      // state at the start of an async fetch (set-state-in-effect) and reading
+      // Date.now() during render for relative-time display (purity). We don't run
+      // the React Compiler, so treat them as advisory warnings rather than errors
+      // instead of contorting working code to satisfy a compiler we don't use.
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/purity': 'warn',
+    },
   },
 ];
 

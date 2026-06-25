@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/use-toast';
 
 interface Stats {
   nodes: { total: number; healthy: number; unhealthy: number; pending: number; error: number };
-  clients: { total: number; active: number; revoked: number; expired: number };
+  clients: { total: number; active: number; disabled: number; revoked: number; expired: number };
   jobs: { running: number; failed: number; pending: number };
 }
 
@@ -153,8 +153,16 @@ export default function DashboardPage() {
                 <div className="text-xs text-muted-foreground">Active</div>
               </div>
               <div className="space-y-1">
+                <div className="text-2xl font-semibold text-zinc-400">{stats.clients.disabled}</div>
+                <div className="text-xs text-muted-foreground">Disabled</div>
+              </div>
+              <div className="space-y-1">
                 <div className="text-2xl font-semibold text-destructive">{stats.clients.revoked}</div>
                 <div className="text-xs text-muted-foreground">Revoked</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-2xl font-semibold text-amber-400">{stats.clients.expired}</div>
+                <div className="text-xs text-muted-foreground">Expired</div>
               </div>
             </div>
             <div className="mt-4">

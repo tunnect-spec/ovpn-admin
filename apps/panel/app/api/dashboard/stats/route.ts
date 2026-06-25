@@ -20,7 +20,9 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
       pendingNodes,
       totalClients,
       activeClients,
+      disabledClients,
       revokedClients,
+      expiredClients,
       runningJobs,
       failedJobs,
       pendingJobs,
@@ -35,7 +37,9 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
       // Clients (managers: only their own)
       prisma.vpnClient.count({ where: { ...nf, ...cf } }),
       prisma.vpnClient.count({ where: { ...nf, ...cf, status: 'ACTIVE' } }),
+      prisma.vpnClient.count({ where: { ...nf, ...cf, status: 'DISABLED' } }),
       prisma.vpnClient.count({ where: { ...nf, ...cf, status: 'REVOKED' } }),
+      prisma.vpnClient.count({ where: { ...nf, ...cf, status: 'EXPIRED' } }),
       // Jobs
       prisma.job.count({ where: { ...nf, status: 'RUNNING' } }),
       prisma.job.count({ where: { ...nf, status: 'FAILED' } }),
@@ -53,8 +57,9 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
       clients: {
         total: totalClients,
         active: activeClients,
+        disabled: disabledClients,
         revoked: revokedClients,
-        expired: totalClients - activeClients - revokedClients,
+        expired: expiredClients,
       },
       jobs: {
         running: runningJobs,

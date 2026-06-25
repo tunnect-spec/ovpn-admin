@@ -4,6 +4,7 @@ import { listAuditLogsSchema } from '@ovpn/api';
 import { withAuth } from '@/lib/middleware';
 import { accessibleNodeIds } from '@/lib/access';
 import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
+import type { Prisma } from '@prisma/client';
 
 // GET /api/audit-logs - List audit logs
 export const GET = withAuth(async (request: NextRequest, payload) => {
@@ -11,15 +12,16 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
     const { searchParams } = new URL(request.url);
     const input = listAuditLogsSchema.parse(Object.fromEntries(searchParams));
 
-    const where: any = {};
+    const where: Prisma.AuditLogWhereInput = {};
     if (input.adminId) where.adminId = input.adminId;
     if (input.nodeId) where.nodeId = input.nodeId;
     if (input.clientId) where.clientId = input.clientId;
     if (input.action) where.action = input.action;
     if (input.from || input.to) {
-      where.createdAt = {};
-      if (input.from) where.createdAt.gte = new Date(input.from);
-      if (input.to) where.createdAt.lte = new Date(input.to);
+      where.createdAt = {
+        ...(input.from ? { gte: new Date(input.from) } : {}),
+        ...(input.to ? { lte: new Date(input.to) } : {}),
+      };
     }
 
     // Managers only see their own actions in the audit log; admins see all.
@@ -50,7 +52,7 @@ export const GET = withAuth(async (request: NextRequest, payload) => {
     ]);
 
     return NextResponse.json({
-      logs: logs.map((log: any) => ({
+      logs: logs.map((log) => ({
         id: log.id,
         adminId: log.adminId,
         adminEmail: log.admin?.email ?? null,

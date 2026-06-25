@@ -47,7 +47,7 @@ export const GET = withAuth(async (request: NextRequest, payload, { params }: { 
     });
 
     return NextResponse.json({
-      clients: clients.map((c: any) => ({
+      clients: clients.map((c) => ({
         id: c.id,
         name: c.name,
         status: c.status,

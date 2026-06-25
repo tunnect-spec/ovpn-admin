@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
 // GET /api/agent/install.sh - Return agent installation script
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const scriptPath = join(process.cwd(), '../../install-agent.sh');
     const script = readFileSync(scriptPath, 'utf-8');

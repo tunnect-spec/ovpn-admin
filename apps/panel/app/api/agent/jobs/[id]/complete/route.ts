@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { verifyApiToken, encrypt } from '@/lib/crypto';
 
@@ -6,7 +7,7 @@ type Params = Promise<{ id: string }>;
 
 interface CompleteJobRequest {
   success: boolean;
-  result?: any;
+  result?: unknown;
   error?: string;
 }
 
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
         status: body.success ? 'COMPLETED' : 'FAILED',
         completedAt: new Date(),
         attempts: { increment: 1 },
-        result: body.success ? body.result : null,
+        result: body.success ? (body.result as Prisma.InputJsonValue) : Prisma.JsonNull,
         error: body.success ? null : body.error || 'Unknown error',
         // Drive the progress bar cleanly to 100% on a successful install.
         ...(body.success && job.type === 'NODE_INSTALL'
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     // If successful and it's a client creation, update client fingerprint
     if (body.success && job.type === 'CLIENT_CREATE' && body.result) {
-      const result = body.result as any;
+      const result = body.result as { client?: { name?: string; fingerprint?: string; ovpnContent?: string } };
       const clientData = result.client || {};
       const { name, fingerprint, ovpnContent } = clientData;
 
@@ -142,7 +143,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
 
     // If successful client revocation
     if (body.success && job.type === 'CLIENT_REVOKE') {
-      const payload = job.payload as any;
+      const payload = job.payload as { clientName?: string } | null;
       const clientName = payload?.clientName;
       if (!clientName) console.error('Client name missing in job payload');
 
@@ -164,7 +165,7 @@ export async function POST(request: NextRequest, { params }: { params: Params })
     // If an enable/disable FAILED on the node, revert the panel's optimistic
     // status so it never claims a client is blocked (or active) when it isn't.
     if (!body.success && (job.type === 'CLIENT_DISABLE' || job.type === 'CLIENT_ENABLE')) {
-      const clientName = (job.payload as any)?.clientName;
+      const clientName = (job.payload as { clientName?: string } | null)?.clientName;
       if (clientName) {
         await prisma.vpnClient.updateMany({
           where: { nodeId, name: clientName, status: { in: ['ACTIVE', 'DISABLED'] } },

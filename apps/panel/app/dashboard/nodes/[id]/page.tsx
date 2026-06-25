@@ -192,7 +192,7 @@ export default function NodeDetailsPage() {
         if (data.status && data.status !== 'PENDING') {
           loadNode(controller.signal, true);
         }
-      } catch (err) {
+      } catch {
         if (controller.signal.aborted) return;
         // transient — keep polling
       }

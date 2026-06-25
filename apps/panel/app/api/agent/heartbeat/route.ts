@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     if (pendingJobs.length > 0) {
       await prisma.job.updateMany({
         where: {
-          id: { in: pendingJobs.map((j: any) => j.id) },
+          id: { in: pendingJobs.map((j) => j.id) },
         },
         data: {
           status: 'RUNNING',

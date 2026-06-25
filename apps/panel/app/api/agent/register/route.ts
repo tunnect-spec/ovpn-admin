@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { agentRegisterSchema } from '@ovpn/api';
 import { verifyRegistrationToken, hashApiToken } from '@/lib/crypto';
 import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
+import type { Prisma } from '@prisma/client';
 
 // POST /api/agent/register - Agent registration (one-time)
 export async function POST(request: NextRequest) {
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
         version: input.agentVersion,
         lastHeartbeatAt: new Date(),
         apiToken: hashedApiToken,
-        metadata: input.systemInfo ? (input.systemInfo as any) : undefined,
+        metadata: input.systemInfo ? (input.systemInfo as Prisma.InputJsonValue) : undefined,
       },
     });
 

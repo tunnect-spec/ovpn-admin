@@ -6,10 +6,12 @@ import { generateInstallCommand } from '@/lib/install';
 import { withAuth, withFullAdmin } from '@/lib/middleware';
 import { accessibleNodeIds } from '@/lib/access';
 import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
+import type { AuthPayload } from '@/lib/auth';
 import type { NodeStatus } from '@ovpn/types';
+import type { Prisma } from '@prisma/client';
 
 // GET /api/nodes - List nodes (managers see only their assigned nodes)
-async function GET_handler(request: NextRequest, payload: any) {
+async function GET_handler(request: NextRequest, payload: AuthPayload) {
   try {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -57,7 +59,7 @@ async function GET_handler(request: NextRequest, payload: any) {
     ]);
 
     return NextResponse.json({
-      nodes: nodes.map((n: any) => ({
+      nodes: nodes.map((n) => ({
         ...n,
         lastHeartbeatAt: n.lastHeartbeatAt?.toISOString() ?? null,
         createdAt: n.createdAt.toISOString(),
@@ -79,7 +81,7 @@ async function GET_handler(request: NextRequest, payload: any) {
 export const GET = withAuth(GET_handler);
 
 // POST /api/nodes - Create new node
-async function POST_handler(request: NextRequest, payload: any) {
+async function POST_handler(request: NextRequest) {
   try {
     const body = await request.json();
     const input = createNodeSchema.parse(body);
@@ -105,7 +107,7 @@ async function POST_handler(request: NextRequest, payload: any) {
         port: input.port ?? 22,
         status: 'PENDING',
         apiToken,
-        metadata: (input.metadata ?? {}) as any,
+        metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
       },
     });
 
@@ -124,7 +126,7 @@ async function POST_handler(request: NextRequest, payload: any) {
       data: {
         action: 'node.created',
         nodeId: node.id,
-        details: { input } as any,
+        details: { input } as Prisma.InputJsonValue,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
       },

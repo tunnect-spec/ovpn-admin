@@ -5,7 +5,7 @@ Complete setup instructions for the self-hosted OpenVPN admin panel.
 ## Prerequisites
 
 - **Docker** & Docker Compose (production)
-- **Node.js** 24 + **pnpm** 9+ (local development only)
+- **Node.js** 20+ & **pnpm** 9+ (local development only)
 - **VPN node**: a server running Ubuntu 22.04/24.04 with root access
 
 ## Production install (recommended)

@@ -90,10 +90,10 @@ OpenVPN operations locally, and reports back.
 On a fresh Ubuntu server:
 
 ```bash
-curl -fsSL https://github.com/tunnect-spec/ovpn-admin/raw/main/quick-install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/tunnect-spec/ovpn-admin/main/quick-install.sh | sudo bash
 
 # …or with your domain (recommended for production):
-curl -fsSL https://github.com/tunnect-spec/ovpn-admin/raw/main/quick-install.sh | sudo DOMAIN=vpn.example.com bash
+curl -fsSL https://raw.githubusercontent.com/tunnect-spec/ovpn-admin/main/quick-install.sh | sudo DOMAIN=vpn.example.com bash
 ```
 
 It installs Docker, generates secrets, builds and starts everything (Postgres,

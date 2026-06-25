@@ -12,6 +12,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import { LoadingState } from '@/components/ui/spinner';
 import { formatBytes, ActivityCell, ExpiryCell, ClientStatusDot } from '@/components/client-ui';
 import { useClientActions } from '@/components/use-client-actions';
+import { useSession } from '@/components/session-context';
 
 interface Client {
   id: string;
@@ -79,6 +80,7 @@ export default function NodeClientsPage() {
   }, [load]);
 
 
+  const { isFullAdmin } = useSession();
   const { renderActions } = useClientActions(() => load(true));
 
   return (
@@ -141,9 +143,11 @@ export default function NodeClientsPage() {
                           <ClientStatusDot status={client.status} />
                           <span className="font-medium text-foreground">{client.name}</span>
                         </div>
-                        <div className="ml-[18px] mt-0.5 truncate text-xs text-muted-foreground">
-                          by {client.createdByEmail ?? 'unknown'}
-                        </div>
+                        {isFullAdmin && (
+                          <div className="ml-[18px] mt-0.5 truncate text-xs text-muted-foreground">
+                            by {client.createdByEmail ?? 'unknown'}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 align-top text-sm">
                         <ActivityCell client={client} />
@@ -176,9 +180,11 @@ export default function NodeClientsPage() {
                       <ClientStatusDot status={client.status} />
                       <span className="truncate font-medium text-foreground">{client.name}</span>
                     </div>
-                    <div className="ml-[18px] truncate text-xs text-muted-foreground">
-                      by {client.createdByEmail ?? 'unknown'}
-                    </div>
+                    {isFullAdmin && (
+                      <div className="ml-[18px] truncate text-xs text-muted-foreground">
+                        by {client.createdByEmail ?? 'unknown'}
+                      </div>
+                    )}
                   </div>
 
                   <ActivityCell client={client} />

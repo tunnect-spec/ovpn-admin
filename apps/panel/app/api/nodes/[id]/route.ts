@@ -4,6 +4,7 @@ import { updateNodeSchema } from '@ovpn/api';
 import { withAuth, withFullAdmin } from '@/lib/middleware';
 import { canAccessNode } from '@/lib/access';
 import { isZodError, zodErrorResponse } from '@/lib/api-helpers';
+import type { Prisma } from '@prisma/client';
 
 type Params = Promise<{ id: string }>;
 
@@ -100,7 +101,7 @@ export const PATCH = withFullAdmin(async (request: NextRequest, payload, { param
       where: { id },
       data: {
         ...input,
-        metadata: input.metadata as any,
+        metadata: input.metadata as Prisma.InputJsonValue,
       },
     });
 
@@ -109,7 +110,7 @@ export const PATCH = withFullAdmin(async (request: NextRequest, payload, { param
       data: {
         action: 'node.updated',
         nodeId: node.id,
-        details: { input } as any,
+        details: { input } as Prisma.InputJsonValue,
         ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
         userAgent: request.headers.get('user-agent') ?? undefined,
       },

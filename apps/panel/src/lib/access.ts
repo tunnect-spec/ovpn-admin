@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { prisma } from './prisma';
 import { AuthPayload, FULL_ADMIN_ROLES } from './auth';
 
@@ -55,9 +54,4 @@ export async function checkClientAccess(
   if (!client) return { exists: false, allowed: false };
   const allowed = isFullAdmin(payload) ? true : client.createdById === payload.sub;
   return { exists: true, allowed, nodeId: client.nodeId };
-}
-
-/** Standard 403 response for scope violations. */
-export function forbidden(message = 'You do not have access to this resource') {
-  return NextResponse.json({ error: 'FORBIDDEN', message }, { status: 403 });
 }

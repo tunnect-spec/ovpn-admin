@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Plus, Trash2, Pencil, Users, Server } from 'lucide-react';
 
 import { apiFetch, UnauthorizedError } from '@/components/use-api';
@@ -109,7 +108,8 @@ export default function ManagersPage() {
   const toggleNode = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };

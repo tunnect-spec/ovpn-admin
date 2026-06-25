@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { formatBytes, ActivityCell, ExpiryCell, ClientStatusDot } from '@/components/client-ui';
 import { useClientActions } from '@/components/use-client-actions';
+import { useSession } from '@/components/session-context';
 
 interface Client {
   id: string;
@@ -66,6 +67,7 @@ const SELECT = 'h-9 rounded-md border border-input bg-background px-3 text-sm fo
 
 export default function ClientsPage() {
   const router = useRouter();
+  const { isFullAdmin } = useSession();
 
   const [clients, setClients] = useState<Client[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
@@ -223,12 +225,15 @@ export default function ClientsPage() {
           <option value="REVOKED">Revoked</option>
           <option value="EXPIRED">Expired</option>
         </select>
-        <select value={createdById} onChange={(e) => setCreatedById(e.target.value)} className={SELECT} aria-label="Filter by creator">
-          <option value="">All creators</option>
-          {creators.map((c) => (
-            <option key={c.id} value={c.id}>{c.email}</option>
-          ))}
-        </select>
+        {/* Creator filter is only meaningful for full admins — managers only ever see their own clients. */}
+        {isFullAdmin && (
+          <select value={createdById} onChange={(e) => setCreatedById(e.target.value)} className={SELECT} aria-label="Filter by creator">
+            <option value="">All creators</option>
+            {creators.map((c) => (
+              <option key={c.id} value={c.id}>{c.email}</option>
+            ))}
+          </select>
+        )}
         {hasFilters && (
           <Button variant="ghost" size="sm" onClick={() => { setSearch(''); setNodeId(''); setStatus(''); setCreatedById(''); }}>
             Clear
@@ -269,7 +274,9 @@ export default function ClientsPage() {
                           <ClientStatusDot status={c.status} />
                           <span className="font-medium text-foreground">{c.name}</span>
                         </div>
-                        <div className="ml-[18px] mt-0.5 truncate text-xs text-muted-foreground">by {c.createdByEmail ?? 'unknown'}</div>
+                        {isFullAdmin && (
+                          <div className="ml-[18px] mt-0.5 truncate text-xs text-muted-foreground">by {c.createdByEmail ?? 'unknown'}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3 align-top whitespace-nowrap text-sm">
                         <Link href={`/dashboard/nodes/${c.nodeId}`} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
@@ -304,7 +311,9 @@ export default function ClientsPage() {
                       <ClientStatusDot status={c.status} />
                       <span className="truncate font-medium text-foreground">{c.name}</span>
                     </div>
-                    <div className="ml-[18px] truncate text-xs text-muted-foreground">by {c.createdByEmail ?? 'unknown'}</div>
+                    {isFullAdmin && (
+                      <div className="ml-[18px] truncate text-xs text-muted-foreground">by {c.createdByEmail ?? 'unknown'}</div>
+                    )}
                   </div>
                   <ActivityCell client={c} />
                   <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">

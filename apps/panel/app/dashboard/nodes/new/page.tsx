@@ -109,7 +109,7 @@ export default function NewNodePage() {
                 <Check className="h-6 w-6 text-white" />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-lg">Node "{result.node.name}" Ready</h3>
+                <h3 className="font-semibold text-lg">Node &ldquo;{result.node.name}&rdquo; Ready</h3>
                 <p className="text-sm text-muted-foreground">Follow the installation steps below</p>
               </div>
               <Badge variant="success" className="gap-1">
@@ -125,7 +125,7 @@ export default function NewNodePage() {
           <CardHeader>
             <CardTitle>Registration Token</CardTitle>
             <CardDescription>
-              Save this token now - it won't be shown again
+              Save this token now - it won&apos;t be shown again
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

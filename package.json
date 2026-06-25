@@ -19,7 +19,6 @@
     "docker:logs": "docker compose -f docker/compose.yml logs -f"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^3.0.0",
     "concurrently": "^10.0.3",
     "prisma": "^7.8.0",
     "tsx": "^4.22.4",
